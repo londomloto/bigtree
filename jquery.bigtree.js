@@ -105,7 +105,8 @@
         },
 
         initComponent: function() {
-            var opt = this.options; 
+            var opt = this.options,
+                prm = opt.params;
 
             this.element.addClass('bigtree').attr('tabindex', 1);
 
@@ -124,14 +125,14 @@
                         },
                         elbow: function(data) {
                             var lines = [],
-                                level = data[opt.params.level],
-                                expanded = data[opt.params.expand] == '1' ? true : false,
-                                isLeaf = data[opt.params.leaf] == '1' ? true : false,
+                                level = +data[prm.level],
+                                expanded = data[prm.expand] == '1',
+                                isparent = data[prm.leaf] == '0',
                                 pdata = data.$parent,
                                 elbow = [];
 
                             while(pdata) {
-                                lines[pdata[opt.params.level]] = pdata.$last ? 0 : 1;
+                                lines[pdata[prm.level]] = pdata.$last ? 0 : 1;
                                 pdata = pdata.$parent;
                             }
 
@@ -141,7 +142,7 @@
 
                                 if (i == level) {
                                     type = 'elbow-end';
-                                    if ( ! isLeaf) {
+                                    if (isparent) {
                                         var cls = expanded ? 'elbow-minus' : 'elbow-plus';
                                         icon = '<span class="elbow-expander '+cls+'"></span>';
                                     }

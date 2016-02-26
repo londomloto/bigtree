@@ -763,17 +763,8 @@
                     if ( ! pdat.$child.length) {
                         pdat.$child = undefined;
                         pdat[param.leaf] = '1';
-                    }/* else {
-                        var endkey = pdat.$child[pdat.$child.length - 1],
-                            endidx = this.indexes[endkey];
-
-                        console.log(endkey);
-                        var ending = this.data[this.indexes[pdat.$child[pdat.$child.length - 1]]];
-                        if (ending) {
-                            ending.$last = true;
-                            this.moving.orig.$ending = ending;
-                        }
-                    }*/
+                    }
+                    
                 }
 
                 this.reindex();

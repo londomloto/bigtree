@@ -19,6 +19,18 @@
         return el instanceof jQuery ? el : $(el);
     }
 
+    // simple indexof, avoid checking
+    function indexof(array, elem) {
+        var size = array.length, i = 0;
+        while(i < size) {
+            if (array[i] === elem) {
+                return i;
+            }
+            i++;
+        }
+        return -1;
+    }
+
     function seltext(input, beg, end) {
         var dom = input[0];
 
@@ -61,22 +73,14 @@
             expand: 'wtt_expanded'
         },
 
-        itemHeight: 32,
+        itemSize: 32,   // item height
+        dragSize: 16,   // drag handle width
+        stepSize: 25,   // level width
+        buffSize: 20,   // gutter from left
+
         delay: 25,
-        padStep: 25,
         buffer: 10,
-        markup: '<div class="bt-node bt-hbox {{:~last($last)}}" ' + 
-                    'data-id="{{:wtt_id}}" ' + 
-                    'data-level="{{:wtt_depth}}" ' + 
-                    'data-leaf="{{:wtt_is_leaf}}">' + 
-                    '{{for ~elbow(#data)}}' + 
-                        '<div class="bt-node-elbow {{:type}}" style="width: {{:width}}px">{{:icon}}</div>' + 
-                    '{{/for}}'+
-                    '<div class="bt-node-body bt-flex bt-hbox">' + 
-                        '<div class="bt-drag"></div>' + 
-                        '<div class="bt-text bt-flex bt-hbox">{{:wtt_title}}</div>' + 
-                    '</div>' + 
-                '</div>'
+        markup: '<div></div>'
     };
 
     BigTree.prototype = {
@@ -90,18 +94,12 @@
             this.orphans = [];
 
             this.visibleData = [];
-            this.moving = {data: null, desc: []};
+            this.moving = {data: null, desc: [], orig: null};
 
             this.initComponent();
             this.initEvents();
 
-            this.element.trigger('init.bt');
-
-            /*if (this.options.data) {
-                this.load(this.options.data);
-                delete this.options.data;
-            }*/
-
+            this.fireEvent('init');
         },
 
         initComponent: function() {
@@ -120,8 +118,8 @@
                 btnode: {
                     markup: opt.markup,
                     helpers: {
-                        last: function($last) {
-                            return $last ? 'bt-last' : '';
+                        last: function(last) {
+                            return last ? 'bt-last' : '';
                         },
                         elbow: function(data) {
                             var lines = [],
@@ -151,7 +149,6 @@
                                 }
 
                                 elbow.push({
-                                    width: opt.padStep,
                                     type: type,
                                     icon: icon
                                 });
@@ -191,7 +188,7 @@
                         deltaScroll = deltaScroll + Math.abs(scrollTop - lastScrollTop);
                     }
                     
-                    if (deltaScroll == 0 || deltaScroll >= (opt.buffer * opt.itemHeight)) {
+                    if (deltaScroll == 0 || deltaScroll >= (opt.buffer * opt.itemSize)) {
                         this.render();
                         deltaScroll = 0;
                     }
@@ -231,7 +228,7 @@
             this.element
                 .off('sortstop.bt')
                 .on('sortstop.bt', $.proxy(function(e, ui){
-                    this.moveStop(ui.item);
+                    this.moveStop(ui.item, ui.originalPosition, ui.position);
                 }, this));
             
             // selection
@@ -359,26 +356,26 @@
         render: function() {
             var stop = this.grid.scrollTop(),
                 ptop = this.grid.position().top,
-                buff = this.options.buffer * this.options.itemHeight,
+                buff = this.options.buffer * this.options.itemSize,
                 spix = stop - ptop - buff;
                 epix = spix + this.element.height() + buff * 2,
                 data = $.grep(this.data, function(d){ return !d.$hidden; });
             
             spix = spix < 0 ? 0 : spix;
 
-            var sidx = Math.floor(spix / this.options.itemHeight),
-                eidx = Math.ceil(epix / this.options.itemHeight),
-                padtop = this.options.itemHeight * sidx,
-                padbtm = this.options.itemHeight * data.slice(eidx).length;
+            var sidx = Math.floor(spix / this.options.itemSize),
+                eidx = Math.ceil(epix / this.options.itemSize),
+                padtop = this.options.itemSize * sidx,
+                padbtm = this.options.itemSize * data.slice(eidx).length + 3 * this.options.itemSize;
 
             this.grid.css({
                 paddingTop: padtop,
                 paddingBottom: padbtm
             });
 
-            this.tickStart('render');
+            // this.tickStart('render');
             this.renderRange(data, sidx, eidx);
-            this.tickStop('render');
+            // this.tickStop('render');
 
         },
 
@@ -714,6 +711,8 @@
         moveStart: function(node) {
             var param = this.options.params,
                 data = this.getNodeData(node);
+            
+            node.addClass('bt-moving');
 
             // we have to detach from collection
             if (data) {
@@ -721,21 +720,50 @@
                     expanded = data[param.expand] == '1',
                     desc = (isparent && this.getDescendants(data)) || [],
                     size = desc.length,
-                    idx = this.indexes[data[param.id]],
-                    i;
+                    pdat = data.$parent,
+                    key = data[param.id],
+                    idx = this.indexes[key];
 
                 // reset
                 this.moving.data = this.data.splice(idx, 1)[0];
                 this.moving.desc = [];
+                this.moving.orig = {};
 
                 if (size) {
                     this.moving.desc = this.data.splice(idx, size);
                     if (expanded) {
                         this.toggle(node, true, 'collapse');
-                        for (i = 0; i < size; i++) {
-                            this.grid.find('.bt-node[data-id='+(desc[i][param.id])+']').hide();
-                        }
+                        var attrs = desc.map(function(d){return '[data-id='+d[param.id]+']';}).join(',');
+                        this.grid.find(attrs).remove();
                     }
+                }
+
+                this.moving.orig.$index = idx;
+
+                if (pdat) {
+                    
+                    var posidx = indexof(pdat.$child, key);
+
+                    this.moving.data.$parent = null;
+                    this.moving.orig.$parent = pdat;
+                    this.moving.orig.$posidx = posidx;
+
+                    pdat.$child.splice(posidx, 1);
+                    
+                    if ( ! pdat.$child.length) {
+                        pdat.$child = undefined;
+                        pdat[param.leaf] = '1';
+                    }/* else {
+                        var endkey = pdat.$child[pdat.$child.length - 1],
+                            endidx = this.indexes[endkey];
+
+                        console.log(endkey);
+                        var ending = this.data[this.indexes[pdat.$child[pdat.$child.length - 1]]];
+                        if (ending) {
+                            ending.$last = true;
+                            this.moving.orig.$ending = ending;
+                        }
+                    }*/
                 }
 
                 this.reindex();
@@ -743,33 +771,273 @@
         },
 
         /** @private */
-        moveStop: function(node) {
-            var prev = node.prev(),
-                next = node.next(),
+        moveStop: function(node, opos, npos) {
+            var opt = this.options,
+                param = opt.params,
+                prev = node.prev('.bt-node'),
+                next = node.next('.bt-node'),
                 oidx = -1; // offset index
 
-            // and, re-attach moved to collection
-            if (prev.length) {
-                oidx = this.indexes[prev.attr('data-id')];
-                oidx++;
-            } else if (next.length) {
-                oidx = this.indexes[next.attr('data-id')];
-            }
-            
+            node.removeClass('bt-moving');
+
             if (this.moving.data) {
+                
+                // take advantages by ommiting `prev` index calculation
+                if (next.length) {
+                    oidx = this.indexes[next.attr('data-id')];
+                } else if (prev.length) {
+                    var xkey = prev.attr('data-id'),
+                        xidx = this.indexes[xkey],
+                        xdat = this.data[xidx];
+
+                    if (xdat[param.leaf] == '0' && xdat[param.expand] == '0') {
+                        var xdes = this.getDescendants(xdat);
+                        oidx = xidx + xdes.length + 1;
+                    } else {
+                        oidx = xidx + 1;
+                    }
+                }
+
                 this.data.splice(oidx, 0, this.moving.data);
+
                 if (this.moving.desc.length) {
                     oidx++;
                     var args = [oidx, 0].concat(this.moving.desc);
                     Array.prototype.splice.apply(this.data, args);
                 }
+
+                this.reindex();
+
+                if (this.moving.orig.$parent) {
+                    var echild = this.moving.orig.$parent.$child || [];
+                    if (echild.length) {
+                        var enddat = this.data[this.indexes[echild[echild.length - 1]]];
+                        if (enddat) {
+                            enddat.$last = true;
+                        }
+                    }
+                }
+
+                var currkey = this.moving.data[param.id],
+                    curridx = this.indexes[currkey],
+                    currdat = this.data[curridx],
+                    currlev = +currdat[param.level],
+                    datalev = null;
+
+                var posLeft = npos.left - opt.buffSize;
+                    
+                // setup new position
+                if (posLeft < -opt.dragSize) { // to left
+                    datalev = currlev - (Math.round(Math.abs(posLeft) / opt.stepSize));
+                } else if (posLeft > opt.dragSize) { // to right
+                    datalev = currlev + (Math.round(posLeft / opt.stepSize));
+                } else { // none
+                    datalev = currlev;
+                }
+
+                datalev = datalev < 0 ? 0 : datalev;
+                
+                if (prev.length) {
+                    var prevkey = prev.attr('data-id'),
+                        previdx = this.indexes[prevkey],
+                        prevdat = this.data[previdx],
+                        prevlev = +prevdat[param.level],
+                        prevpos,
+                        prevpar;
+
+                    if (prevdat[param.leaf] == '1') {
+                        if (datalev > prevlev) {
+                            // as new child
+                            currdat.$parent = prevdat;
+                            currdat.$last = true;
+                            currdat[param.level] = prevlev + 1;
+
+                            prevdat.$child = [currkey];
+                            prevdat.$last = true;
+
+                            if (prevdat.$parent) {
+                                prevdat.$last = indexof(prevdat.$parent.$child, prevkey) == 
+                                        prevdat.$parent.$child.length - 1;
+                            }
+
+                            prevdat[param.leaf] = '0';
+                            prevdat[param.expand] = '1';
+
+                        } else if (datalev == prevlev) {
+                            // as sibling
+                            if (prevdat.$parent) {
+                                prevpos = indexof(prevdat.$parent.$child, prevkey);
+                                currdat.$parent = prevdat.$parent;
+                                currdat.$last = prevpos == prevdat.$parent.$child.length - 1;
+                                currdat[param.level] = datalev;
+                                
+                                prevdat.$last = false;
+                                prevdat.$parent.$child.splice(prevpos + 1, 0, currkey);
+                            } else {
+                                currdat.$parent = null;
+                                currdat.$last = this.data[curridx + 1] === false;
+                                currdat[param.level] = prevlev;
+                            }
+                        } else {
+                            // ugh... bubbling
+                            this.bubbleMove(currdat, curridx, datalev, previdx);
+                        }
+                    } else {
+                        if (prevdat[param.expand] == '0') {
+                            if (datalev > prevlev || datalev == prevlev) {
+                                // as sibling
+                                if (prevdat.$parent) {
+                                    prevpos = indexof(prevdat.$parent.$child, prevkey);
+                                    currdat.$parent = prevdat.$parent;
+                                    currdat.$last = prevpos == prevdat.$parent.$child.length - 1;
+                                    currdat[param.level] = prevlev;
+
+                                    prevdat.$last = false;
+                                    prevdat.$parent.$child.splice(prevpos + 1, 0, currkey);
+                                } else {
+                                    currdat.$parent = null;
+                                    currdat.$last = this.data[curridx + 1] === false;
+                                    currdat[param.level] = prevlev;   
+                                }
+                            } else {
+                                // ugh... bubbling
+                                this.bubbleMove(currdat, curridx, datalev, previdx);
+                            }
+                        } else {
+                            if (datalev > prevlev) {
+                                // as fists child
+                                currdat.$parent = prevdat;
+                                currdat.$last = false;
+                                currdat[param.level] = prevlev + 1;
+
+                                prevdat.$child.unshift(currkey);
+                            } else {
+                                this.bubbleMove(currdat, curridx, datalev, previdx);
+                            }
+                        }
+                    }
+                } else if (next.length) {
+                    var nextkey = next.attr('data-id'),
+                        nextidx = this.indexes[nextkey],
+                        nextdat = this.data[nextidx];
+
+                    currdat.$parent = nextdat.$parent;
+                    currdat.$last = false;
+                    currdat[param.level] = nextdat[param.level];
+
+                } else {
+                    currdat.$parent = null;
+                    currdat.$last = true;
+                    currdat[param.level] = 0;
+                }
+
+                if (this.moving.desc) {
+                    var dlen = this.moving.desc.length, 
+                        width = +currdat[param.level] - currlev,
+                        i;
+                    for (i = 0; i < dlen; i++) {
+                        this.moving.desc[i][param.level] = +this.moving.desc[i][param.level] + width;
+                    }
+                }
+
+                this.moving.data = null;
+                this.moving.desc = [];
+                this.moving.orig = null;
+
+                this.render();
+
+                // prepare event
+                var position = this.position(currdat);
+                this.fireEvent('move', currdat, position);
+
+            }
+            
+        },
+
+        bubbleMove: function(currdat, curridx, datalev, previdx) {
+            var param = this.options.params,
+                budat = this.data[previdx],
+                bupos = 0,
+                dslev = datalev - 1,
+                bulev;
+
+            while(budat) {
+                bulev = +budat[param.level];
+                if (bulev == datalev) {
+                    budat.$last = false;
+                    bupos++;
+                }
+                if (bulev == dslev) break;
+                budat = this.data[previdx--];
             }
 
-            this.moving.data = null;
-            this.moving.desc = [];
+            var invalid = false;
 
-            this.reindex();
-            this.render();
+            if (budat) {
+                var nextdat = this.data[curridx + 1];
+                if (nextdat && +nextdat[param.level] > datalev) {
+                    invalid = true;
+                } else {
+                    currdat.$parent = budat;
+                    budat.$child = budat.$child || [];
+                    budat.$child.splice(bupos, 0, currdat[param.id]);
+                    currdat.$last = bupos == budat.$child.length - 1;
+                    currdat[param.level] = datalev;
+                }
+            } else {
+                invalid = true;
+            }
+
+            if (invalid) {
+                // hard reset
+                var orig = this.moving.orig;
+
+                if (orig.$parent) {
+                    currdat.$parent = orig.$parent;
+                    if (orig.$parent.$child === undef) {
+                        orig.$parent.$child = [currdat[param.id]];
+                        orig.$parent[param.leaf] = '0';
+                    } else {
+                        orig.$parent.$child.splice(orig.$posidx, 0, currdat[param.id]);
+                    }
+                }
+
+                this.moveData(curridx, orig.$index);
+            }
+
+        },
+
+        position: function(data) {
+            var pos = {parent: null, prev: null, next: null},
+                params = this.options.params,
+                level = data[params.level],
+                index;
+
+            if (data.$parent) {
+                var child = data.$parent.$child || [], pkey, prev, nkey, next;
+
+                pos.parent = data.$parent;
+
+                index = indexof(child, data[params.id]);
+
+                pkey  = child[index - 1];
+                nkey  = child[index + 1];
+
+                if (pkey) {
+                    pos.prev = this.data[this.indexes[pkey]];
+                }
+
+                if (nkey) {
+                    pos.next = this.data[this.indexes[nkey]];
+                }
+            } else {
+                index = this.indexes[data[params.id]];
+
+                pos.prev = this.data[index - 1] || null;
+                pos.next = this.data[index + 1] || null;
+            }
+            
+            return pos;
         },
 
         /** @deprecated */
@@ -819,12 +1087,12 @@
                         break;
                         // up
                         case 38:
-                            prev = node.prev();
+                            prev = node.prev('.bt-node');
                             prev.length && this.startEdit(prev);
                         break;
                         // down
                         case 40:
-                            next = node.next();
+                            next = node.next('.bt-node');
                             next.length && this.startEdit(next);
                         break;
 

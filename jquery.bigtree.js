@@ -62,25 +62,35 @@
     BigTree.defaults = {
 
         params: {
-            id: 'wtt_id',
-            text: 'wtt_title',
-            pid: 'wtt_parent_id',
-            left: 'wtt_left',
-            right: 'wtt_right',
-            level: 'wtt_depth',
-            leaf: 'wtt_is_leaf',
-            path: 'wtt_path',
-            expand: 'wtt_expanded'
+            id: 'id',
+            text: 'text',
+            level: 'level',
+            leaf: 'leaf',
+            path: 'path',
+            expand: 'expand'
         },
-
-        itemSize: 32,   // item height
-        dragSize: 16,   // drag handle width
-        stepSize: 25,   // level width
-        buffSize: 20,   // gutter from left
-
+        
+        // item height
+        itemSize: 32,
+        
+        // drag handle width
+        dragSize: 16,
+        
+        // level width
+        stepSize: 25,
+        
+        // gutter from left
+        buffSize: 20,
+        
+        // scroll delay
         delay: 25,
+        
+        // additional leading & trailing item
         buffer: 10,
+        
+        // look at `markup.tpl`
         markup: '<div></div>'
+        
     };
 
     BigTree.prototype = {

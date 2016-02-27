@@ -3,10 +3,10 @@
  *
  * jQuery plugin for rendering hierarchical data
  * Dependencies:
- *      - jQuery
- *      - jQuery UI
- *      - jsRender
- *      - jQuery Throttle
+ *      - jQuery (https://jquery.com)
+ *      - jQuery UI (https://jqueryui.com)
+ *      - jsRender (https://www.jsviews.com)
+ *      - jQuery Throttle (http://benalman.com/projects/jquery-throttle-debounce-plugin/)
  *
  * @author Roso Sasongko <roso@kct.co.id>
  */
@@ -19,7 +19,12 @@
         return el instanceof jQuery ? el : $(el);
     }
 
-    // simple indexof, avoid checking
+    /**
+     * Get index of element from array.
+     * This is fastest method rather than using Array.indexOf by avoiding
+     * several type checking. See polyfill:
+     * https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Global_Objects/Array/indexOf
+     */
     function indexof(array, elem) {
         var size = array.length, i = 0;
         while(i < size) {
@@ -31,6 +36,10 @@
         return -1;
     }
 
+    /**
+     * Select text inside particular input field.
+     * Don't confuse with $.select, which actualy used for triggering `select` event.
+     */
     function seltext(input, beg, end) {
         var dom = input[0];
 
@@ -52,13 +61,17 @@
         }
     }
 
-    //--------------------------------------------------------
-
+    /**
+     * Constructor
+     */
     var BigTree = function (element, options) {
         this.element = $(element);
         this.init(options);
     };
     
+    /**
+     * Default options
+     */
     BigTree.defaults = {
 
         params: {
@@ -72,17 +85,32 @@
             path: 'wtt_path',
             expand: 'wtt_expanded'
         },
+        
+        // item height
+        itemSize: 32,
+        
+        // drag handle width
+        dragSize: 16,
+        
+        // level width
+        stepSize: 25,
+        
+        // gutter from left
+        buffSize: 20,
 
-        itemSize: 32,   // item height
-        dragSize: 16,   // drag handle width
-        stepSize: 25,   // level width
-        buffSize: 20,   // gutter from left
-
+        // scroll delay
         delay: 25,
+
+        // leading & trailing rendered nodes
         buffer: 10,
+
+        // node markup, can contains templating tags supported by jsRender
         markup: '<div></div>'
     };
 
+    /**
+     * Prototype
+     */
     BigTree.prototype = {
 
         init: function(options) {
@@ -92,8 +120,7 @@
             this.data = [];
             this.indexes = {};
             this.orphans = [];
-
-            this.visibleData = [];
+            this.visible = [];
             this.moving = {data: null, desc: [], orig: null};
 
             this.initComponent();
@@ -383,7 +410,7 @@
                 });
             }
 
-            this.visibleData = range;
+            this.visible = range;
             this.grid.append($.templates.btnode(range));
             this.element.focus();
 
@@ -402,15 +429,15 @@
         },
 
         /** various helpers */
-        getLastData: function() {
+        lastData: function() {
             return this.data[this.data.length - 1];
         },
 
-        getVisibleData: function() {
-            return this.visibleData;
+        visibleData: function() {
+            return this.visible;
         },
 
-        getDataIndex: function(data) {
+        index: function(data) {
             var index = this.indexes[data[this.options.params.id]];
             return isNaN(index) ? -1 : index;
         },
@@ -454,12 +481,41 @@
             return arr;
         },
 
-        prev: function() {
+        nearest: function(data, offset) {
+            var params = this.options.params,
+                pdata = data.$parent,
+                key = data[params.id];
+            if (pdata) {
+                var pchild = pdata.$child || [],
+                    cindex = indexof(pchild, key);
+                return this.data[this.indexes[pchild[cindex + offset]]] || null;
+            } else {
+                var index = this.indexes[key],
+                    level = +data[params.level],
+                    runlev;
 
+                index = index + offset;
+                near  = this.data[index];
+
+                while(near && (runlev = +near[params.level]) >= level) {
+                    if (runlev == level) break;
+                    index = index + offset;
+                    near = this.data[index];
+                }
+                return near || null;
+            }
         },
 
-        next: function() {
+        parent: function(data) {
+            return data.$parent;
+        },
 
+        prev: function(data) {
+            return this.nearest(data, -1);
+        },
+
+        next: function(data) {
+            return this.nearest(data, 1);
         },
 
         movedNode: function() {
@@ -842,11 +898,11 @@
                             currdat[params.level] = prevlev + 1;
 
                             prevdat.$child = [currkey];
-                            prevdat.$last = true;
 
                             if (prevdat.$parent) {
-                                prevdat.$last = indexof(prevdat.$parent.$child, prevkey) == 
-                                        prevdat.$parent.$child.length - 1;
+                                prevdat.$last = indexof(prevdat.$parent.$child, prevkey) == prevdat.$parent.$child.length - 1;
+                            } else {
+                                prevdat.$last = ! this.next(prevdat);
                             }
 
                             prevdat[params.leaf] = '0';
@@ -949,7 +1005,11 @@
 
                 // prepare event
                 if (changed) {
-                    var position = this.position(currdat);
+                    var position = {
+                        parent: this.parent(currdat),
+                        prev: this.prev(currdat),
+                        next: this.next(currdat)
+                    };
                     this.fireEvent('move', currdat, position);    
                 }
 
@@ -976,23 +1036,33 @@
 
             var invalid = false,
                 isparent = currdat[params.leaf] == '0',
-                nextdat = this.data[curridx + 1],
-                nextkey,
-                nextlev;
+                desc = [],
+                dlen,
+                didx,
+                next,
+                i;
 
-            // validate next
-            if (nextdat) {
-                nextkey = nextdat[params.id];
-                nextlev = +nextdat[params.level];
+            if (isparent) {
+                if (currdat[params.expand] == '1') {
+                    desc = this.descendants(currdat);
+                    dlen = desc.length;
+                    didx = this.indexes[desc[dlen - 1][params.id]];
+                    next = this.data[didx + 1];
+                } else {
+                    next = this.data[curridx + 1];
+                }
+            } else {
+                next = this.data[curridx + 1];
+            }
 
-                invalid = (isparent && indexof(currdat.$child, nextkey) === -1) || 
-                          ( ! isparent && nextlev > offlev);
+            if (next) {
+                invalid = +next[params.level] > offlev;
             }
 
             if ( ! invalid) {
                 var prevlen = prevs.length;
                 if (prevlen)
-                    for (var i = 0; i < prevlen; i++) 
+                    for (i = 0; i < prevlen; i++) 
                         prevs[i].$last = false;
 
                 if (bubble) {
@@ -1004,6 +1074,9 @@
                 } else {
                     currdat.$parent = null;
                     currdat[params.level] = 0;
+                    
+                    next = this.next(currdat);
+                    if (next) currdat.$last = false;
                 }
             } else {
                 // hard reset
@@ -1019,44 +1092,15 @@
                     }
                 }
 
-                this.moveData(curridx, orig.$index);
+                desc.unshift(currdat);
+
+                this.data.splice(curridx, desc.length);
+                Array.prototype.splice.apply(this.data, [orig.$index, 0].concat(desc));
+                this.reindex();
             }
 
             prevs = null;
             return ! invalid;
-        },
-
-        position: function(data) {
-            var pos = {parent: null, prev: null, next: null},
-                params = this.options.params,
-                level = data[params.level],
-                index;
-
-            if (data.$parent) {
-                var child = data.$parent.$child || [], pkey, nkey;
-
-                pos.parent = data.$parent;
-
-                index = indexof(child, data[params.id]);
-
-                pkey  = child[index - 1];
-                nkey  = child[index + 1];
-
-                if (pkey) {
-                    pos.prev = this.data[this.indexes[pkey]];
-                }
-
-                if (nkey) {
-                    pos.next = this.data[this.indexes[nkey]];
-                }
-            } else {
-                index = this.indexes[data[params.id]];
-
-                pos.prev = this.data[index - 1];
-                pos.next = this.data[index + 1];
-            }
-            
-            return pos;
         },
 
         /** @deprecated */
@@ -1066,7 +1110,7 @@
         },
 
         /** @private */
-        moveData: function(from, to) {
+        moveData: function(from, to, reindex) {
             var size = this.data.length, tmp, i;
             if (from != to && from >= 0 && from <= size && to >= 0 && to <= size) {
                 tmp = this.data[from];
@@ -1079,8 +1123,11 @@
                         this.data[i] = this.data[i-1];
                     }
                 }
+
                 this.data[to] = tmp;
-                this.reindex();
+
+                reindex = reindex === undef ? true : reindex;
+                reindex && this.reindex();
             }
         },
 

@@ -60,8 +60,12 @@ On progress...
 ## Documentation
 1. Options
   * __markup__
-    HTML markup that is used for render each node. Markup can contains tags (template) supported by __jsRender__
+  
+    HTML markup used for rendering each node. Markup can contains tags (template) supported by __jsRender__
+
   * __itemSize__
+    
+    
 
 2. Method
 3. Events

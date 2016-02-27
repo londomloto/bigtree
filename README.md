@@ -61,7 +61,7 @@ On progress...
 1. Options
   * __markup__
   
-    HTML markup used for rendering each node. Markup can contains tags (template) supported by __jsRender__
+    HTML markup used for rendering each node. Markup can contains tags (template) supported by [__jsRender__](https://www.jsviews.com/)
 
   * __itemSize__
     

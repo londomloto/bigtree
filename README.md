@@ -43,10 +43,26 @@ On progress...
            |_____ Node 6
     ```
 
-4. xxx
+4. Using Events
+    
+    ```javascript
+    // edit event
+    $('#tree').on('edit.bt', function(e, oldText, newText){
+        console.log(oldText, newText);
+    });
+    
+    // move event
+    $('#tree').on('move.bt', function(e, data, position){
+        console.log(position);
+    });
+    ```
 
 ## Documentation
 1. Options
+  * __markup__
+    HTML markup that is used for render each node. Markup can contains tags (template) supported by __jsRender__
+  * __itemSize__
+
 2. Method
 3. Events
 

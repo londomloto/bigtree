@@ -27,7 +27,7 @@ On progress...
         {id: 1, text: 'Node 1', path: '1'},
         {id: 2, text: 'Node 2', path: '1/2'},
         {id: 3, text: 'Node 3', path: '3'},
-        {id: 4, text: 'Node 4', path: '3/4}
+        {id: 4, text: 'Node 4', path: '3/4'}
     ];
     
     $('#tree').bigtree('load', data);

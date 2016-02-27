@@ -1,6 +1,6 @@
 # Bigtree
 
-High performance hierarchical data rendering based on nested set model (tree traversal preorder), suitable for MySQL database.
+High performance hierarchical data rendering based on nested set model (can also be used for adjacency).
 
 ## Credit
 - londomloto

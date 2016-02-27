@@ -10,11 +10,8 @@
  *
  * @author Roso Sasongko <roso@kct.co.id>
  */
-(function($){
-
-    /** internal helpers */
-    var undef = undefined;
-
+(function($, undef){
+    
     function make(el) {
         return el instanceof jQuery ? el : $(el);
     }
@@ -41,7 +38,7 @@
      * Don't confuse with $.select, which actualy used for triggering `select` event.
      */
     function seltext(input, beg, end) {
-        var dom = input[0];
+        var dom = input[0], range;
 
         beg = beg === undef ? 0 : beg;
         end = end === undef ? input.val().length : end;
@@ -151,8 +148,8 @@
                         elbow: function(data) {
                             var lines = [],
                                 level = +data[params.level],
-                                expanded = +data[params.expand] == 1,
-                                isparent = +data[params.leaf] == 0,
+                                expanded = +data[params.expand] === 1,
+                                isparent = +data[params.leaf] === 0,
                                 pdata = data.$parent,
                                 elbow = [];
 
@@ -209,7 +206,7 @@
 
                     scroll = lastdir != currdir ? 0 : (scroll + Math.abs(currtop - lasttop));
 
-                    if (scroll == 0 || scroll >= (options.buffer * options.itemSize)) {
+                    if (scroll === 0 || scroll >= (options.buffer * options.itemSize)) {
                         this.render();
                         scroll = 0;
                     }
@@ -249,13 +246,13 @@
             this.element
                 .off('sortstop.bt')
                 .on('sortstop.bt', $.proxy(function(e, ui){
-                    this.moveStop(ui.item, ui.originalPosition.left, ui.position.left);
+                    this.moveStop(ui.item, ui.position.left);
                 }, this));
             
             // selection
             this.element
                 .off('click.bt.select')
-                .on('click.bt.select', $.proxy(function(e){
+                .on('click.bt.select', $.proxy(function(){
                     this.deselectAll();
                 }, this));
 
@@ -294,7 +291,6 @@
         load: function(data) {
             var params = this.options.params,
                 start = this.data.length,
-                size,
                 dlen,
                 i;
 
@@ -375,7 +371,7 @@
             var stop = this.grid.scrollTop(),
                 ptop = this.grid.position().top,
                 buff = this.options.buffer * this.options.itemSize,
-                spix = stop - ptop - buff;
+                spix = stop - ptop - buff,
                 epix = spix + this.element.height() + buff * 2,
                 data = $.grep(this.data, function(d){ return !d.$hidden; });
             
@@ -424,7 +420,7 @@
         decorate: function() { 
             if (this.selected) {
                 var snode = this.grid.find('.bt-node[data-id='+this.selected+']');
-                snode.length && this.select(snode);
+                if (snode.length) this.select(snode);
             }
         },
 
@@ -492,6 +488,7 @@
             } else {
                 var index = this.indexes[key],
                     level = +data[params.level],
+                    near,
                     runlev;
 
                 index = index + offset;
@@ -553,14 +550,14 @@
         },
 
         isParentNode: function(node) {
-            return +make(node).attr('data-leaf') == 0;
+            return +make(node).attr('data-leaf') === 0;
         },
 
         isLeafNode: function(node) {
             return +make(node).attr('data-leaf') == 1;
         },
 
-        cascade: function(data, callback) {
+        cascade: function() {
 
         },
 
@@ -661,7 +658,7 @@
             this.select(node);
 
             // place editor
-            this.editor.appendTo(holder)
+            this.editor.appendTo(holder);
             this.edtext.val(text).focus();
 
             // defer text select
@@ -814,7 +811,7 @@
         },
 
         /** @private */
-        moveStop: function(node, opos, npos) {
+        moveStop: function(node, npos) {
             var options = this.options,
                 params = options.params,
                 prev = node.prev('.bt-node'),
@@ -886,8 +883,7 @@
                         previdx = this.indexes[prevkey],
                         prevdat = this.data[previdx],
                         prevlev = +prevdat[params.level],
-                        prevpos,
-                        prevpar;
+                        prevpos;
 
                     if (prevdat[params.leaf] == '1') {
                         if (datalev > prevlev) {
@@ -1127,7 +1123,7 @@
                 this.data[to] = tmp;
 
                 reindex = reindex === undef ? true : reindex;
-                reindex && this.reindex();
+                if (reindex) this.reindex();
             }
         },
 
@@ -1149,17 +1145,17 @@
                         case 9:
                             var method = e.shiftKey ? 'prev' : 'next',
                                 target = node[method].call(node);
-                            target.length && this.startEdit(target);
+                            if (target.length) this.startEdit(target);
                         break;
                         // up
                         case 38:
                             prev = node.prev('.bt-node');
-                            prev.length && this.startEdit(prev);
+                            if (prev.length) this.startEdit(prev);
                         break;
                         // down
                         case 40:
                             next = node.next('.bt-node');
-                            next.length && this.startEdit(next);
+                            if (next.length) this.startEdit(next);
                         break;
 
                     }    

@@ -4,7 +4,7 @@ High performance hierarchical data rendering based on nested set model (can also
 
 ## Features
 
-  * Virtual scrolling (support +1 millions nodes)
+  * Virtual scrolling (tested +1 millions nodes)
   * Movable nodes
   * Editable nodes
 

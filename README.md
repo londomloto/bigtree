@@ -75,19 +75,19 @@ On progress...
 
 2. Method
   
-  *__move()__, move data to new position programmatically.
-  *__load()__, loading data.
-  *__parent()__, get data parent.
+  * __move()__, move data to new position programmatically.
+  * __load()__, loading data.
+  * __parent()__, get data parent.
 
-```javascript
-var p = $('#tree').bigtree('parent', data);
-```
-or, using instance:
+        ```javascript
+        var p = $('#tree').bigtree('parent', data);
+        ```
+        or, using instance:
 
-```javascript
-var o = $('#tree').bigtree('plugin'),
-    p = o.parent(data);
-```
+        ```javascript
+        var o = $('#tree').bigtree('plugin'),
+        p = o.parent(data);
+        ```
 
 
 3. Events

@@ -7,6 +7,7 @@ High performance hierarchical data rendering based on nested set model (can also
   * Virtual scrolling (tested +1 millions nodes)
   * Movable nodes
   * Editable nodes
+  * Keyboard navigation
 
 ## Working Demo
 [Demo](https://plnkr.co/edit/qd1WMs2yVxOqlxe2QJGt?p=preview)

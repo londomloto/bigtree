@@ -9,7 +9,7 @@ High performance hierarchical data rendering based on nested set model (can also
   * Editable nodes
 
 ## Working Demo
-On progress...
+[Demo](https://plnkr.co/edit/qd1WMs2yVxOqlxe2QJGt?p=preview)
 
 ## Example Usages
 1. Include library

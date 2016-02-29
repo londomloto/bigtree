@@ -64,35 +64,50 @@ On progress...
     ```
 
 ## Documentation
-1. Options
-  * __markup__
-  
-    HTML markup used for rendering each node. Markup can contains tags (template) supported by [__jsRender__](https://www.jsviews.com/)
+### Options
 
-  * __itemSize__
-    
-    
+* ___markup___
+* ___itemSize___
+* ___delay___
+* ___buffer___
 
-2. Method
-  
-  * __move()__, move data to new position programmatically.
-  * __load()__, loading data.
-  * __parent()__, get data parent.
+### Method
 
-        ```javascript
-        var p = $('#tree').bigtree('parent', data);
-        ```
-        or, using instance:
+* ___obj()___
+* ___load(data)___
+* ___index()___
+* ___get(index)___
+* ___parent(data)___
+* ___children(data)___
+* ___descendants(data)___
+* ___ancestors(data)___
+* ___isparent(data)___
+* ___isleaf(data)___
+* ___isphantom(data)___
+* ___first()___
+* ___prev(data)___
+* ___next(data)___
+* ___last()___
+* ___move(data, position)___
+* ___swap(data, from, to)___
+* ___select(data)___
+* ___deselect(data)___
+* ___deselectAll()___
+* ___expand(data)___
+* ___collapse(data)___
+* ___toggle(data[, force])___
+* ___search(query)___
+* ___destroy([remove])___
 
-        ```javascript
-        var o = $('#tree').bigtree('plugin'),
-        p = o.parent(data);
-        ```
+### Events
 
+* ___init.bt___
+* ___beforerender.bt___
+* ___render.bt___
+* ___edit.bt___
+* ___move.bt___
 
-3. Events
-
-## Author
+## Authors
 - [londomloto](https://github.com/londomloto)
 
 

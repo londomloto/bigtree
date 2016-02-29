@@ -1,6 +1,10 @@
 # Bigtree
 
 High performance hierarchical data rendering based on nested set model (can also be used for adjacency).
+Features:
+  * Virtual scrolling (support +1 millions nodes)
+  * Movable nodes
+  * Editable nodes
 
 ## Working Demo
 On progress...

@@ -11,7 +11,22 @@
  * @author Roso Sasongko <roso@kct.co.id>
  */
 (function($, undef){
-    
+    // preparing for striptags
+    /*var bodyre = '((?:[^"\'>]|"[^"]*"|\'[^\']*\')*)',
+        tagsre = new RegExp(
+            '<(?:'
+            + '!--(?:(?:-*[^->])*--+|-?)'
+            + '|script\\b' + bodyre + '>[\\s\\S]*?</script\\s*'
+            + '|style\\b' + bodyre + '>[\\s\\S]*?</style\\s*'
+            + '|/?[a-z]'
+            + bodyre
+            + ')>',
+            'gi'
+        );*/
+
+    /**
+     * Cast element to jQuery object
+     */
     function make(el) {
         return el instanceof jQuery ? el : $(el);
     }
@@ -31,6 +46,16 @@
             i++;
         }
         return -1;
+    }
+
+    function firstof(array) {
+        array = array || [];
+        return array[0];
+    }
+
+    function lastof(array) {
+        array = array || [];
+        return array[array.length - 1];
     }
 
     /**
@@ -58,6 +83,30 @@
         }
     }
 
+    function debug() {
+        var args = $.makeArray(arguments),
+            arr = ['[' + args.shift() + ']'];
+
+        for (var i = 0, j = args.length; i < j; i++) {
+            arr.push(' ; ');
+            arr.push(args[i]);
+        }
+
+        console.log.apply(console, arr);
+    }
+
+    /**
+     * Sanitize (remove) html tags from string
+     */
+    /*function striptags(txt) {
+        var old;
+        do {
+            old = txt;
+            txt = txt.replace(tagsre, '');
+        } while (txt != old);
+        return txt.replace(/</g, '&lt;');
+    }*/
+
     /**
      * Constructor
      */
@@ -71,10 +120,9 @@
      */
     BigTree.defaults = {
 
-        params: {
+        fields: {
             id: 'wtt_id',
             text: 'wtt_title',
-            pid: 'wtt_parent_id',
             left: 'wtt_left',
             right: 'wtt_right',
             level: 'wtt_depth',
@@ -82,7 +130,7 @@
             path: 'wtt_path',
             expand: 'wtt_expanded'
         },
-        
+
         // item height
         itemSize: 32,
         
@@ -102,7 +150,22 @@
         buffer: 10,
 
         // node markup, can contains templating tags supported by jsRender
-        markup: '<div></div>'
+        markup: '<div class="bt-node bt-hbox {{:~last($last)}}" '+
+                    'data-id="{{:id}}" '+
+                    'data-level="{{:level}}" '+
+                    'data-leaf="{{:leaf}}">'+
+                    '{{for ~elbow(#data)}}'+
+                        '<div class="bt-node-elbow {{:type}}">{{:icon}}</div>'+
+                    '{{/for}}'+
+                    '<div class="bt-node-body bt-flex bt-hbox">'+
+                        '<div class="bt-drag"></div>'+
+                        '<div class="bt-text bt-flex bt-hbox">{{:text}}</div>'+
+                        '<div class="bt-plugin"></div>'+
+                        '<div class="bt-trash"></div>'+
+                    '</div>'+
+                '</div>',
+
+        debug: true
     };
 
     /**
@@ -113,22 +176,24 @@
         init: function(options) {
 
             this.options = $.extend(true, {}, BigTree.defaults, options || {});
+            this._data = [];
+            this._indexes = {};
 
-            this.data = [];
-            this.indexes = {};
-            this.orphans = [];
-            this.visible = [];
-            this.moving = {data: null, desc: [], orig: null};
+            this._visible = [];
+            this._ranges = [0, 0];
+            this._moving = null;
+            this._manual = false;
+            this._message = '';
 
-            this.initComponent();
-            this.initEvents();
-
-            this.fireEvent('init');
+            this._initComponent();
+            this._initEvents();
+            this._fireEvent('init');
         },
 
-        initComponent: function() {
+        /** @private */
+        _initComponent: function() {
             var options = this.options,
-                params = options.params;
+                fields = options.fields;
 
             this.element.addClass('bigtree').attr('tabindex', 1);
 
@@ -140,63 +205,32 @@
             // init template
             $.templates({
                 btnode: {
-                    markup: options.markup,
-                    helpers: {
-                        last: function(last) {
-                            return last ? 'bt-last' : '';
-                        },
-                        elbow: function(data) {
-                            var lines = [],
-                                level = +data[params.level],
-                                expanded = +data[params.expand] === 1,
-                                isparent = +data[params.leaf] === 0,
-                                pdata = data.$parent,
-                                elbow = [];
-
-                            while(pdata) {
-                                lines[pdata[params.level]] = pdata.$last ? 0 : 1;
-                                pdata = pdata.$parent;
-                            }
-
-                            for (var i = 0; i <= level; i++) {
-                                var type = '', 
-                                    icon = '';
-
-                                if (i == level) {
-                                    type = 'elbow-end';
-                                    if (isparent) {
-                                        var cls = expanded ? 'elbow-minus' : 'elbow-plus';
-                                        icon = '<span class="elbow-expander '+cls+'"></span>';
-                                    }
-                                } else {
-                                    type = lines[i] == 1 ? 'elbow-line' : '';
-                                }
-
-                                elbow.push({
-                                    type: type,
-                                    icon: icon
-                                });
-                            }
-                            return elbow;
-                        }
-                    }
+                    markup: options.markup
                 }
             });
 
             // init sortable
             this.element.sortable({
                 items: '.bt-node',
-                handle: '.bt-drag'
-                // placeholder: 'bt-node-sortable ui-sortable-placeholder'
+                handle: '.bt-drag',
+                placeholder: 'bt-node-sortable ui-sortable-placeholder'
             });
 
         },
 
-        initEvents: function() {
+        /** @private */
+        _initEvents: function() {
             var options = this.options,
                 lasttop = this.element.scrollTop(),
                 lastdir = '',
                 scroll = 0;
+
+            $('.task-search').on('click', $.proxy(function(){
+                var a = prompt('action', 'append'),
+                    b = prompt(a),
+                    c = prompt('data');
+                this[a].call(this, this._data[+b], this._data[+c]);
+            }, this));
 
             this.element
                 .off('scroll.bt')
@@ -207,7 +241,7 @@
                     scroll = lastdir != currdir ? 0 : (scroll + Math.abs(currtop - lasttop));
 
                     if (scroll === 0 || scroll >= (options.buffer * options.itemSize)) {
-                        this.render();
+                        if ( ! this._manual) this.render();
                         scroll = 0;
                     }
 
@@ -221,9 +255,9 @@
                 .on('click.bt.expander', '.elbow-expander', $.proxy(function(e){
                     e.stopPropagation();
                     var node = $(e.currentTarget).closest('.bt-node'),
-                        data = this.data[this.indexes[node.attr('data-id')]];
+                        data = this.get(node.attr('data-id'));
                     if (data) {
-                        if (data[options.params.expand] == '1') {
+                        if (this.isexpanded(data)) {
                             this.collapse(data);
                         } else {
                             this.expand(data);
@@ -234,19 +268,19 @@
             // navigation
             this.element
                 .off('keydown.bt')
-                .on('keydown.bt', $.proxy(this.navigate, this));
+                .on('keydown.bt', $.proxy(this._navigate, this));
 
             // handle dragdrop event
             this.element
                 .off('sortstart.bt')
                 .on('sortstart.bt', $.proxy(function(e, ui){
-                    this.moveStart(ui.item);
+                    this._beforeDrag(ui.item);
                 }, this));
 
             this.element
                 .off('sortstop.bt')
                 .on('sortstop.bt', $.proxy(function(e, ui){
-                    this.moveStop(ui.item, ui.position.left);
+                    this._afterDrag(ui.item, ui.position.left);
                 }, this));
             
             // selection
@@ -289,98 +323,97 @@
         },
 
         load: function(data) {
-            var params = this.options.params,
-                start = this.data.length,
-                dlen,
-                i;
+            var fields = this.options.fields,
+                start = this._data.length,
+                stop;
 
-            data = data || [];
-            dlen = data.length;
+            this._data.push.apply(this._data, (data || []));
+            stop = this._data.length;
 
-            // append to existing
-            this.data.push.apply(this.data, data);
-
-            // build index
-            for (
-                i = dlen;
-                i--;
-                this.indexes[data[i][params.id]] = i + start
-            );
-
-            // build tree
-            for (i = 0; i < dlen; i++) {
-                var curr = this.data[i + start],
-                    ckey = curr[params.id],
-                    path = curr[params.path].split('/'),
-                    pkey,
-                    lkey,
-                    ldat;
-
-                path.pop();
-                pkey = path.pop();
-
-                curr.$parent = null;
-
-                if (pkey) {
-                    var pdat = this.data[this.indexes[pkey]];
-                    if (pdat) {
-                        pdat.$child = pdat.$child || [];
-
-                        lkey = pdat.$child[pdat.$child.length - 1];
-                        ldat = this.data[this.indexes[lkey]];
-                            
-                        if (ldat) {
-                            ldat.$last = false;
-                        }
-
-                        curr.$last   = true;
-                        curr.$hidden = pdat[params.expand] == '0' || pdat.$hidden;
-                        curr.$parent = pdat;
-                        
-                        pdat.$child.push(ckey);
-                    }
-                } else {
-
-                    lkey = this.orphans[this.orphans.length - 1];
-                    ldat = this.data[this.indexes[lkey]];
-
-                    if (ldat) {
-                        ldat.$last = false;
-                    }
-                            
-                    curr.$last = true;
-                    curr.$hidden = false;
-
-                    this.orphans.push(ckey);
-                }
-            }
-
+            this._reindex(start, stop);
+            this._rebuild(start, stop);
         },
 
-        reindex: function() {
-            var params = this.options.params;
-            this.indexes = {};
-            for (
-                var i = this.data.length;
-                i--;
-                this.indexes[this.data[i][params.id]] = i
-            );
+        /** @private */
+        _reindex: function(start, stop) {
+            var fields = this.options.fields, i;
+            
+            start = start === undef ? 0 : start;
+            stop  = stop  === undef ? this._data.length : stop;
+
+            for (i = start; i < stop; i++)  {
+                this._indexes[this._data[i][fields.id]] = i;
+            }
+        },
+
+        /** @private */
+        _rebuild: function(start, stop) {
+            var fields = this.options.fields,
+                root = null,
+                i;
+            
+            start = start === undef ? 0 : start;
+            stop  = stop  === undef ? this._data.length : stop;
+
+            if (start > 0 && this._data[start]) {
+                root  = this._data[start]._root || null;
+            }
+
+            for (i = start; i < stop; i++) {
+                var cur = this._data[i],
+                    key = cur[fields.id];
+
+                if (+cur[fields.level] === 0) {
+                    if (root) {
+                        root._last = false;
+                    }
+                    
+                    cur._root   = null;
+                    cur._parent = null;
+                    cur._last   = true;
+                    cur._hidden = false;
+                    cur._elbows = [];
+
+                    root = cur;
+                } else  {
+                    var pid = cur[fields.path].split('/'), par, chd;
+
+                    pid.pop();
+                    pid = pid.pop();
+
+                    par = this._data[this._indexes[pid]];
+                    par._child = par._child || [];
+
+                    chd = this._data[this._indexes[lastof(par._child)]];
+                    if (chd) chd._last = false;
+
+                    cur._root   = root;
+                    cur._parent = par;
+                    cur._last   = true;
+                    cur._hidden = +par[fields.expand] === 0 || par._hidden;
+                    cur._elbows = [];
+
+                    par._child.push(cur[fields.id]);
+                }
+
+            }
         },
 
         render: function() {
+            console.log('called');
             var stop = this.grid.scrollTop(),
                 ptop = this.grid.position().top,
                 buff = this.options.buffer * this.options.itemSize,
                 spix = stop - ptop - buff,
                 epix = spix + this.element.height() + buff * 2,
-                data = $.grep(this.data, function(d){ return !d.$hidden; });
+                data = $.grep(this._data, function(d){ return !d._hidden; });
             
             spix = spix < 0 ? 0 : spix;
 
-            var sidx = Math.floor(spix / this.options.itemSize),
-                eidx = Math.ceil(epix / this.options.itemSize),
-                padtop = this.options.itemSize * sidx,
-                padbtm = this.options.itemSize * data.slice(eidx).length + 3 * this.options.itemSize;
+            var begidx = Math.floor(spix / this.options.itemSize),
+                endidx = Math.ceil(epix / this.options.itemSize),
+                padtop = this.options.itemSize * begidx,
+                padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
 
             this.grid.css({
                 paddingTop: padtop,
@@ -388,87 +421,727 @@
             });
 
             // this.tickStart('render');
-            this.renderRange(data, sidx, eidx);
+            this._renderRange(data, begidx, endidx);
             // this.tickStop('render');
         },
 
-        renderRange: function(data, start, end) {
+        scroll: function(data) {
+            var options = this.options,
+                stacks = $.grep(this._data, function(d){ return ! d._hidden; }),
+                scroll = indexof(stacks, data) * options.itemSize,
+                element = this.element;
+                
+            element.animate({scrollTop: scroll}, scroll);
+        },
+
+        /** @private */
+        _renderRange: function(data, start, end) {
             var range = data.slice(start, end),
-                params = this.options.params,
+                fields = this.options.fields,
                 moved = this.movedNode();
+
+            this._fireEvent('beforenodesrender');
 
             this.editor.detach();
             this.removableNodes().remove();
 
             if (moved.length) {
                 range = $.grep(range, function(d){
-                    return d[params.id] != moved.attr('data-id');
+                    return d[fields.id] != moved.attr('data-id');
                 });
             }
 
-            this.visible = range;
+            this._visible = range;
+            this._ranges  = [start, end];
+
+            // create elbows for current range only
+            for (var i = 0, size = range.length; i < size; i++) {
+                var data = range[i], 
+                    owner = data._parent,
+                    level = +data[fields.level],
+                    isparent = +data[fields.leaf] === 0,
+                    isexpand = +data[fields.expand] === 1,
+                    lines = [],
+                    elbows = [],
+                    type,
+                    icon,
+                    cls,
+                    j;
+
+                while(owner) {
+                    lines[owner[fields.level]] = owner._last ? 0 : 1;
+                    owner = owner._parent;
+                }
+
+                for (j = 0; j <= level; j++) {
+                    if (j === level) {
+                        type = 'elbow-end';
+                        icon = isparent 
+                            ? '<span class="elbow-expander ' + (isexpand ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
+                            : '';
+                    } else {
+                        type = lines[j] === 1 ? 'elbow-line' : '';
+                        icon = '';
+                    }
+                    elbows.push({
+                        type: type,
+                        icon: icon
+                    });
+                }
+
+                data._elbows = elbows;
+            }
+
             this.grid.append($.templates.btnode(range));
             this.element.focus();
 
             if (moved.length) {
                 this.element.sortable('refresh');
             } else {
-                this.decorate();
+                this._decorate();
             }
+
+            var visdata = this.visible(),
+                visnode = this.visibleNodes();
+
+            this._fireEvent('nodesrender', visnode, visdata);
         },
 
-        decorate: function() { 
-            if (this.selected) {
-                var snode = this.grid.find('.bt-node[data-id='+this.selected+']');
+        /** @private */
+        _decorate: function() { 
+            if (this._selected) {
+                var snode = this.grid.find('.bt-node[data-id='+this._selected+']');
                 if (snode.length) this.select(snode);
             }
         },
 
-        /** various helpers */
-        lastData: function() {
-            return this.data[this.data.length - 1];
+        /**
+         * Get visible or rendered data
+         */
+        visible: function() {
+            return this._visible;
         },
 
-        visibleData: function() {
-            return this.visible;
+        /** @private */
+        create: function(spec) {
+            if ( ! spec) 
+                throw new Error("create(): data spec doesn't meet requirement");
+
+            var data = {}, node, prop;
+
+            for (prop in this.options.fields) {
+                data[prop] = spec[prop] || '';
+            }
+            
+            return {
+                node: $.templates.btnode(data),
+                data: data
+            };
+        },
+
+        /**
+         * Remove data from collection
+         */
+        remove: function(data) {
+            data = data || {};
+        },
+
+        /**
+         * Update data using provided spec
+         */
+        update: function(data, spec) {
+            data = data || {};
+            spec = spec || {};
+        },
+
+        append: function(owner, data) {
+            if (this._isvalid(data, 'append', owner)) {
+                if (this.isphantom(data)) {
+
+                } else {
+                    var desc = this.descendants(data),
+                        node = this.nodeof(owner);
+
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'append', owner);
+                    
+                    if (node.length) {
+                        this.render();
+                    }
+                }
+            } else {
+                this._debug();
+            }
+        },
+
+        before: function(next, data) {
+            if (this._isvalid(data, 'before', next)) {
+                if (this.isphantom(data)) {
+
+                } else {
+                    var desc = this.descendants(data),
+                        node = this.nodeof(next);
+
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'before', next);
+
+                    if (node.length) {
+                        this.render();    
+                    }
+                }
+            } else {
+                this._debug();
+            }
+        },
+
+        after: function(prev, data) {
+            if (this._isvalid(data, 'after', prev)) {
+                // var fields = this.options.fields;
+
+                if (this.isphantom(data)) {
+                    
+                } else {
+                    var desc = this.descendants(data),
+                        node = this.nodeof(prev);
+
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'after', prev);
+
+                    if (node.length) {
+                        this.render();    
+                    }
+                }
+
+            } else {
+                this._debug();
+            }
+        },
+
+        /** @private */
+        _isvalid: function(data, type, dest) {
+            var fields = this.options.fields;
+
+            if (this.isphantom(dest)) {
+                this._error(type + "(): offset data doesn't exists!");
+                return false;
+            }
+
+            if (dest[fields.id] == data[fields.id]) {
+                this._error(type + "(): can't move to itself!");
+                return false;
+            }
+
+            if (this.isdescendant(data, dest)) {
+                this._error(type + "(): can't move to descendant!");
+                return false;
+            }
+
+            switch(type) {
+                case 'before':
+                    if (
+                        this.index(dest) - this.descendants(data).length - 1 == this.index(data) && 
+                        data[fields.level] == dest[fields.level]
+                    ){
+                        this._error("before(): nothing to move!");
+                        return false;
+                    }
+                break;
+
+                case 'after':
+                    if (
+                        this.index(dest) + this.descendants(dest).length + 1 == this.index(data) && 
+                        data[fields.level] == dest[fields.level]
+                    ){
+                        this._error("after(): nothing to move!");
+                        return false;
+                    }
+                break;
+
+                case 'append':
+                    var child = dest._child || [];
+                    if (child[child.length - 1] == data[fields.id]) {
+                        this._error("append(): nothing to move!");
+                        return false;
+                    }
+                break;
+            }
+
+            return true;
+        },
+
+        _beforeDrag: function(node) {
+            var fields = this.options.fields,
+                data = this.dataof(node);
+
+            this.deselectAll();
+            this.select(node);
+
+            node.addClass('bt-moving');
+
+            if (data) {
+                var isexpand = +data[fields.expand] === 1,
+                    desc = this.descendants(data),
+                    size = desc.length,
+                    attr;
+
+                if (size) {
+                    this.toggle(node, true, 'collapse');
+                    attr = desc.map(function(d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
+                    this.grid.children(attr).remove();
+                }
+
+            }
+        },
+
+        _afterDrag: function(node, offset) {
+            var options = this.options,
+                indexes = this._indexes,
+                fields = options.fields,
+                stacks = this._data,
+                data = this.dataof(node),
+                prev = node.prev('.bt-node'),
+                next = node.next('.bt-node');
+
+            var bubbling = function(current, start, level) {
+                var siblings = [],
+                    bubble = stacks[start],
+                    target = level - 1,
+                    curr;
+
+                target = target < 0 ? 0 : target;
+
+                while(bubble) {
+                    curr = +bubble[fields.level];
+                    if (curr === level) siblings.push(bubble);
+                    if (curr === target) break;
+                    bubble = stacks[--start];
+                }
+                
+                if (siblings.length) {
+                    return ['after', siblings[siblings.length - 1], current];
+                } else {
+                    return ['append', bubble, current];    
+                }
+            };
+
+            node.removeClass('bt-moving');
+            
+            // define level
+            var dataLevel = +data[fields.level],
+                dragLevel = 0,
+                tolerance = 5,
+                args = [];
+
+            offset = offset - options.buffSize;
+
+            if (offset + tolerance < -options.dragSize) {
+                dragLevel = dataLevel - (Math.round(Math.abs(offset) / options.stepSize));
+            } else if (offset > options.dragSize) {
+                dragLevel = dataLevel + (Math.round(offset / options.stepSize));
+            } else {
+                dragLevel = dataLevel;
+            }
+
+            dragLevel = dragLevel < 0 ? 0 : dragLevel;
+
+            if (prev.length) {
+                var prevData = this.dataof(prev),
+                    prevLevel = this.level(prevData),
+                    prevIndex = this.index(prevData),
+                    prevChild = prevData._child || [];
+
+                if (dragLevel > prevLevel) {
+                    if (prevChild.length) {
+                        args = ['before', this.get(prevChild[0]), data];
+                    } else {
+                        args = ['append', prevData, data];
+                    }
+                } else if (dragLevel === prevLevel) {
+                    args = ['after', prevData, data];
+                } else {
+                    args = bubbling(data, prevIndex, dragLevel);
+                }
+            } else if (next.length) {
+                var nextData = this.dataof(next);
+                args = ['before', nextData, data];
+            } else {
+                this.render();
+            }
+
+            if (args.length) {
+                var action = args.shift();
+                this[action].apply(this, args);
+
+                if ( ! this.isvisible(data)) {
+                    this.scroll(data);
+                }
+
+            }
+        },
+
+        /** @private */
+        _detach: function(data, descs) {
+            var fields = this.options.fields,
+                offset = this.index(data),
+                size = descs.length;
+
+            if (offset > -1) {
+                this._data.splice(offset, 1);
+                delete this._indexes[data[fields.id]];
+                
+                var owner = data._parent || null, 
+                    regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
+                    retrm = new RegExp('^/');
+                    level = +data[fields.level];
+
+                if (owner) {
+                    owner._child = owner._child || [];
+                    var cindex = indexof(owner._child, data[fields.id]);
+                    if (cindex > -1) {
+                        owner._child.splice(cindex, 1);
+                        if ( ! owner._child.length) {
+                            owner[fields.leaf] = '1';
+                        }
+                    }
+                }
+
+                data._parent = null;
+                data._root   = null;
+
+                data[fields.level] = 0;
+                data[fields.path]  = data[fields.path].replace(regex, '').replace(retrm, '');
+
+                if (size) {
+                    this._data.splice(offset, size);
+                    for (var i = 0; i < size; i++) {
+                        descs[i]._root = null;
+                        
+                        descs[i][fields.path]  = descs[i][fields.path].replace(regex, '').replace(retrm, '');
+                        descs[i][fields.level] = +descs[i][fields.level] - level;
+
+                        delete this._indexes[descs[i][fields.id]];
+                    }
+                }
+
+                regex = null;
+                retrm = null;
+
+                this._reindex(offset);
+            }
+        },
+
+        /** @private */
+        _attach: function(data, descs, type, dest) {
+            var fields = this.options.fields,
+                dsize = descs.length,
+                offset = -1,
+                prefix = '',
+                bindex = 0,
+                level = 0,
+                owner = null,
+                root = null,
+                pos = 0,
+                i;
+
+            // define offset
+            switch(type) {
+                case 'after':
+                    offset = this.index(dest);
+                    level = +dest[fields.level];
+                    owner = dest._parent;
+                    root = dest._root;
+                    pos = +dest[fields.left] + this.size(dest);
+
+                    if (owner) {
+                        prefix = owner[fields.path] + '/';
+                        bindex = this.index(owner);
+                    } else {
+                        bindex = offset;
+                    }
+
+                    offset += this.descendants(dest).length + 1;
+
+                break;
+
+                case 'before':
+                    offset = this.index(dest);
+                    level = +dest[fields.level];
+                    owner = dest._parent;
+                    root = dest._root;
+                    pos = +dest[fields.left];
+
+                    if (owner) {
+                        prefix = owner[fields.path] + '/';
+                        bindex = this.index(owner);
+                    }
+                break;
+
+                case 'append':
+                    prefix = dest[fields.path] + '/';
+                    offset = this.index(dest);
+                    level = +dest[fields.level] + 1;
+                    root = dest._root;
+                    pos = +dest[fields.right];
+
+                    bindex = offset;
+                    offset += this.descendants(dest).length + 1;
+
+                    if (dest[fields.leaf] == '1') {
+                        dest[fields.leaf] = '0';
+                    }
+
+                break;
+            }
+
+            if (offset > -1) {
+
+                this._data.splice(offset, 0, data);
+
+                data._root = root;
+                data[fields.level] = level;
+                data[fields.path] = prefix + data[fields.path];
+
+                if (dsize) {
+                    Array.prototype.splice.apply(this._data, [(offset + 1), 0].concat(descs));
+                    for (i = 0; i < dsize; i++) {
+                        descs[i][fields.level] = +descs[i][fields.level] + level;
+                        descs[i][fields.path]  = prefix + descs[i][fields.path];
+                    }
+                }
+                
+                this._reindex(offset);
+
+                // update like SQL
+                var p = pos,
+                    l = +data[fields.left],
+                    r = +data[fields.right],
+                    j = this._data.length,
+                    d,
+                    x,
+                    y;
+
+                for (i = 0; i < j; i++) {
+                    d = this._data[i];
+
+                    x = +d[fields.left];
+                    y = +d[fields.right];
+
+                    if (r < p || p < l) {
+
+                        if (p > r) {
+                            if (r < x && x < p) {
+                                x += l - r - 1;
+                            } else if (l <= x && x < r) {
+                                x += p - r - 1;
+                            } else {
+                                x += 0;
+                            }
+
+                            if (r < y && y < p) {
+                                y += l - r - 1;
+                            } else if (l < y && y <= r) {
+                                y += p - r - 1;
+                            } else {
+                                y += 0;
+                            }
+                        } else {
+                            if (p <= x && x < l) {
+                                x += r - l + 1;
+                            } else if (l <= x && x < r) {
+                                x += p - l;
+                            } else {
+                                x += 0;
+                            }
+
+                            if (p <= y && y < l) {
+                                y += r - l + 1;
+                            } else if (l < y && y <= r) {
+                                y += p - l;
+                            } else {
+                                y += 0;
+                            }
+                        }
+
+                        d[fields.left]  = x;
+                        d[fields.right] = y;
+
+                        
+                    }
+
+                    if (i >= bindex) {
+                        // reset child but keep parent
+                        if (d._parent) {
+                            d._parent._child = [];
+                        }    
+                    }
+
+                }
+                
+                // rebuild...
+                this._rebuild(bindex);
+
+            }
+        },
+        
+        get: function(key) {
+            var index = this._indexes[key];
+            return this._data[index] || null;
+        },
+
+        data: function(index) {
+            return index !== undef ? this._data[index] : this._data;
         },
 
         index: function(data) {
-            var index = this.indexes[data[this.options.params.id]];
-            return isNaN(index) ? -1 : index;
+            if (data) {
+                var index = this._indexes[data[this.options.fields.id]];
+                return index === undef ? -1 : index;    
+            }
+            return -1;
+        },
+
+        size: function(data) {
+            return this.right(data) - this.left(data) + 1;
+        },
+
+        level: function(data) {
+            return +data[this.options.fields.level];
+        },
+
+        left: function(data) {
+            return +data[this.options.fields.left];
+        },
+
+        right: function(data) {
+            return +data[this.options.fields.right];
+        },
+
+        isphantom: function(data) {
+            return this.index(data) === -1;
+        },
+
+        isleaf: function(data) {
+            return this.right(data) - this.left(data) === 1;
+        },
+
+        isparent: function(data) {
+            return ! this.isleaf(data);
+        },
+
+        isancestor: function(data, target) {
+            return this.left(data) > this.left(target) && this.right(data) < this.right(target);
+        },
+
+        isdescendant: function(data, target) {
+            return this.left(target) > this.left(data) && this.right(target) < this.right(data);
+        },
+
+        isexpanded: function(data) {
+            return +data[this.options.fields.expand] === 1;
+        },
+
+        iscollapsed: function(data) {
+            return ! this.isexpanded(data);
+        },
+
+        isvisible: function(data) {
+            var index = this.index(data);
+            return index >= this._ranges[0] && index <= this._ranges[1];
+        },
+
+        first: function() {
+            return this._data[0];
+        },
+
+        last: function() {
+            return this._data[this._data.length - 1];
+        },
+
+        parent: function(data) {
+            return data._parent;
+        },
+
+        prev: function(data) {
+            var fields = this.options.fields,
+                owner = data._parent,
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) - 1]];
+                found = this.data(index);
+            } else {
+                var prev, plvl, dlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                prev  = this._data[--index];
+
+                while(prev && (plvl = +prev[fields.level]) >= dlvl) {
+                    if (plvl === dlvl) {
+                        found = prev;
+                        break;
+                    }
+                    prev  = this._data[--index];
+                }
+            }
+
+            return found || null;
+        },
+
+        next: function(data) {
+            var fields = this.options.fields, 
+                owner = data._parent, 
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) + 1]];
+                found = this.data(index);
+            } else {
+                var next, dlvl, nlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                next  = this._data[++index];
+
+                while(next && (nlvl = +next[fields.level]) >= dlvl) {
+                    if (nlvl === dlvl) {
+                        found = next;
+                        break;
+                    }
+                    next  = this._data[++index];
+                }
+            }
+            return found;
         },
 
         descendants: function(data) {
-            var arr = [];
+            var fields = this.options.fields,
+                start = this._indexes[data[fields.id]],
+                next = this._data[++start],
+                desc = [],
+                rgt = +data[fields.right];
 
-            function cascade(data) {
-                var child = (data.$child || []).slice(0);
-                while(child.length) {
-                    var key = child.shift(),
-                        idx = this.indexes[key],
-                        row = this.data[idx];
-
-                    if (row) {
-                        arr.push(row);    
-                        if (row.$child !== undef) {
-                            cascade.call(this, row);
-                        }
-                    }
-                }    
+            while(next) {
+                if (+next[fields.right] >= rgt) 
+                    break;
+                desc.push(next);
+                next = this._data[++start];
             }
-
-            cascade.call(this, data);
-            return arr;
+            return desc;
         },
 
         children: function(data) {
-            var child = data.$child || [],
+            var child = data._child || [],
                 len = child.length,
                 arr = [];
 
             for (var i = 0; i < len; i++) {
-                var idx = this.indexes[child[i]],
-                    row = this.data[idx];
+                var idx = this._indexes[child[i]],
+                    row = this._data[idx];
                 if (row) {
                     arr.push(row);
                 }
@@ -477,42 +1150,12 @@
             return arr;
         },
 
-        nearest: function(data, offset) {
-            var params = this.options.params,
-                pdata = data.$parent,
-                key = data[params.id];
-            if (pdata) {
-                var pchild = pdata.$child || [],
-                    cindex = indexof(pchild, key);
-                return this.data[this.indexes[pchild[cindex + offset]]] || null;
-            } else {
-                var index = this.indexes[key],
-                    level = +data[params.level],
-                    near,
-                    runlev;
-
-                index = index + offset;
-                near  = this.data[index];
-
-                while(near && (runlev = +near[params.level]) >= level) {
-                    if (runlev == level) break;
-                    index = index + offset;
-                    near = this.data[index];
-                }
-                return near || null;
-            }
+        createNode: function(data) {
+            return $($.templates.btnode(data));
         },
 
-        parent: function(data) {
-            return data.$parent;
-        },
-
-        prev: function(data) {
-            return this.nearest(data, -1);
-        },
-
-        next: function(data) {
-            return this.nearest(data, 1);
+        nodeof: function(data) {
+            return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
         },
 
         movedNode: function() {
@@ -529,32 +1172,15 @@
 
         selectedNode: function() {
             var node = $({});
-            if (this.selected) {
-                node = this.grid.children('.bt-node[data-id=' + this.selected + ']');
+            if (this._selected) {
+                node = this.grid.children('.bt-node[data-id=' + this._selected + ']');
             }
             return node.length ? node : null;
         },
 
-        nodeKey: function(node) {
-            return make(node).attr('data-id');
-        },
-
-        nodeData: function(node) {
-            var key = this.nodeKey(node),
-                idx = this.indexes[key];
-            return this.data[idx];
-        },
-
-        nodeLevel: function(node) {
-            return +make(node).attr('data-level');
-        },
-
-        isParentNode: function(node) {
-            return +make(node).attr('data-leaf') === 0;
-        },
-
-        isLeafNode: function(node) {
-            return +make(node).attr('data-leaf') == 1;
+        dataof: function(node) {
+            var key = node.attr('data-id');
+            return this._data[this._indexes[key]];
         },
 
         cascade: function() {
@@ -562,42 +1188,42 @@
         },
 
         expand: function(data) {
-            var params = this.options.params,
+            var fields = this.options.fields,
                 fshow = function(data) {
                     var ds = this.children(data),
                         dz = ds.length;
                     for (var i = 0; i < dz; i++) {
-                        ds[i].$hidden = false;
-                        if (ds[i].$child !== undef && ds[i][params.expand] == '1') {
+                        ds[i]._hidden = false;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
                             fshow.call(this, ds[i]);
                         }
                     }    
                 };
 
-            data[params.expand] = '1';
+            data[fields.expand] = '1';
             fshow.call(this, data);
 
-            this.fireEvent('expand', data);
+            this._fireEvent('expand', data);
             this.render();
         },
 
         collapse: function(data) {
-            var params = this.options.params,
+            var fields = this.options.fields,
                 fhide = function(data) {
                     var ds = this.children(data),
                         dz = ds.length;
                     for (var i = 0; i < dz; i++) {
-                        ds[i].$hidden = true;
-                        if (ds[i].$child !== undef && ds[i][params.expand] == '1') {
+                        ds[i]._hidden = true;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
                             fhide.call(this, ds[i]);
                         }
                     }     
                 };
 
-            data[params.expand] = '0'; 
+            data[fields.expand] = '0'; 
             fhide.call(this, data);
 
-            this.fireEvent('collapse', data);
+            this._fireEvent('collapse', data);
             this.render();
         },
 
@@ -628,28 +1254,38 @@
 
         /** @private */
         select: function(node) {
-            this.selected = node.attr('data-id');
+            this._selected = node.attr('data-id');
             node.addClass('bt-selected');
         },
 
         /** @private */
         deselect: function(node) {
-            this.selected = null;
+            this._selected = null;
             node.removeClass('bt-selected');
         },
 
         /** @private */
         deselectAll: function() {
-            this.selected = null;
-            this.grid.find('.bt-selected').removeClass('bt-selected');
+            this._selected = null;
+            this.grid.children('.bt-selected').removeClass('bt-selected');
+        },
+
+        selection: function() {
+            var node = this.grid.children('.bt-selected');
+            return node.length ? this._data[this._indexes[this._selected]] : null;
         },
 
         /** @private */
         startEdit: function(node) {
-            var data = this.data[this.indexes[node.attr('data-id')]],
-                params = this.options.params,
+            var data = this._data[this._indexes[node.attr('data-id')]],
+                fields = this.options.fields,
                 holder = node.find('.bt-text'),
-                text = data[params.text];
+                text = data[fields.text];
+
+            // remove query hightlight
+            if (data._orig && data._orig.text) {
+                text = data._orig.text;
+            }
 
             // drop previous editing
             this.stopEdit(true);
@@ -671,82 +1307,97 @@
 
         /** @private */
         stopEdit: function(deselect) {
-            var params = this.options.params,
+            var fields = this.options.fields,
                 node = this.editor.closest('.bt-node');
                 
             if (node.length) {
-                var data = this.data[this.indexes[node.attr('data-id')]],
+                var data = this._data[this._indexes[node.attr('data-id')]],
                     text = this.edtext.val(),
-                    orig = data[params.text];
-                
-                data[params.text] = text;
+                    orig = data[fields.text],
+                    disp = text;
+
+                if (data._orig && data._orig.text) {
+                    orig = data._orig.text;
+                    disp = data._orig.disp;
+                }
+
+                data[fields.text] = disp;
                 deselect = deselect === undef ? true : deselect;
                 
                 if (deselect) {
                     this.deselect(node);
                     // remove editor
                     this.editor.detach();
-                    node.find('.bt-text').html(text);
+                    node.find('.bt-text').html(disp);
                 }
 
                 if (text != orig) {
-                    this.fireEvent('edit', data, text);
+                    this._fireEvent('edit', data, text);
                 }
             } else {
                 // manual deselect...
-                this.selected = null;
+                this._selected = null;
                 this.grid.find('.bt-selected').removeClass('bt-selected');
             }
 
         },
 
-        search: function(query) {
-            var params = this.options.params,
+        query: function(query) {
+
+            var fields = this.options.fields,
                 regex = new RegExp('('+query+')', 'igm'),
-                size = this.data.length,
-                data,
-                orig,
+                size = this._data.length,
                 text,
+                data,
+                disp,
                 i;
 
             for (i = 0; i < size; i++) {
 
-                data = this.data[i];
-                orig = data.$orig;
+                data  = this._data[i];
 
                 // reset first
-                if (orig !== undef) {
-                    data.$hidden = orig.hidden;
-                    data[params.expand] = orig.expand;
-                    data[params.text] = orig.text;
-                    delete data.$orig;
+                if (data._orig) {
+                    data._hidden = data._orig.hidden;
+                    
+                    data[fields.expand] = data._orig.expand;
+                    data[fields.text] = data._orig.text;
+
+                    delete data._orig;
                 }
 
                 if (query) {
-                    text = data[params.text];
+                    text = data[fields.text];
 
-                    data.$orig = {
-                        hidden: data.$hidden,
-                        expand: data[params.expand],
+                    data._orig = {
+                        hidden: data._hidden,
+                        expand: data[fields.expand],
                         text: text
                     };
 
                     var found = regex.exec(text);
 
-                    data.$hidden = true;
+                    data._hidden = true;
 
                     if (found) {
 
-                        data.$hidden = false;
-                        data[params.text] = data[params.text].replace(found[1], '<span class="bt-text-hightlight">'+found[1]+'</span>');
+                        disp = data[fields.text].replace(
+                            found[1], 
+                            '<span class="bt-hightlight">'+found[1]+'</span>'
+                        );
 
-                        var pdat = data.$parent;
+                        data._hidden = false;
+                        data._orig.disp = disp;
+                        data[fields.text] = disp;
+
+                        var pdat = data._parent;
+
                         while(pdat) {
-                            if (pdat.$hidden) {
-                                pdat.$hidden = false;
+                            if (pdat._hidden) {
+                                pdat._hidden = false;
                             }
-                            pdat[params.expand] = '1';
-                            pdat = pdat.$parent;
+                            pdat[fields.expand] = '1';
+                            pdat = pdat._parent;
                         }
                     }
                 }
@@ -757,378 +1408,35 @@
             this.render();
         },
 
-        /** @private */
-        moveStart: function(node) {
-            var params = this.options.params,
-                data = this.nodeData(node);
-            
-            node.addClass('bt-moving');
 
-            // we have to detach from collection
-            if (data) {
-                var isparent = data[params.leaf] == '0',
-                    expanded = data[params.expand] == '1',
-                    desc = (isparent && this.descendants(data)) || [],
-                    size = desc.length,
-                    pdat = data.$parent,
-                    key = data[params.id],
-                    idx = this.indexes[key];
 
-                // reset
-                this.moving.data = this.data.splice(idx, 1)[0];
-                this.moving.desc = [];
-                this.moving.orig = {};
-
-                if (size) {
-                    this.moving.desc = this.data.splice(idx, size);
-                    if (expanded) {
-                        this.toggle(node, true, 'collapse');
-                        var attrs = desc.map(function(d){return '[data-id='+d[params.id]+']';}).join(',');
-                        this.grid.find(attrs).remove();
-                    }
-                }
-
-                this.moving.orig.$index = idx;
-
-                if (pdat) {
-                    
-                    var posidx = indexof(pdat.$child, key);
-
-                    this.moving.data.$parent = null;
-                    this.moving.orig.$parent = pdat;
-                    this.moving.orig.$posidx = posidx;
-
-                    pdat.$child.splice(posidx, 1);
-                    
-                    if ( ! pdat.$child.length) {
-                        pdat.$child = undefined;
-                        pdat[params.leaf] = '1';
-                    }
-                }
-
-                this.reindex();
-            }
-        },
-
-        /** @private */
-        moveStop: function(node, npos) {
-            var options = this.options,
-                params = options.params,
-                prev = node.prev('.bt-node'),
-                next = node.next('.bt-node'),
-                oidx = -1,
-                changed = true;
-
-            node.removeClass('bt-moving');
-
-            if (this.moving.data) {
-                
-                // take advantages by ommiting `prev` index calculation
-                if (next.length) {
-                    oidx = this.indexes[next.attr('data-id')];
-                } else if (prev.length) {
-                    var xkey = prev.attr('data-id'),
-                        xidx = this.indexes[xkey],
-                        xdat = this.data[xidx];
-
-                    if (xdat[params.leaf] == '0' && xdat[params.expand] == '0') {
-                        var xdes = this.descendants(xdat);
-                        oidx = xidx + xdes.length + 1;
-                    } else {
-                        oidx = xidx + 1;
-                    }
-                }
-
-                this.data.splice(oidx, 0, this.moving.data);
-
-                if (this.moving.desc.length) {
-                    oidx++;
-                    var args = [oidx, 0].concat(this.moving.desc);
-                    Array.prototype.splice.apply(this.data, args);
-                }
-
-                this.reindex();
-
-                if (this.moving.orig.$parent) {
-                    var echild = this.moving.orig.$parent.$child || [];
-                    if (echild.length) {
-                        var enddat = this.data[this.indexes[echild[echild.length - 1]]];
-                        if (enddat) {
-                            enddat.$last = true;
-                        }
-                    }
-                }
-
-                var currkey = this.moving.data[params.id],
-                    curridx = this.indexes[currkey],
-                    currdat = this.data[curridx],
-                    currlev = +currdat[params.level],
-                    datalev = null;
-
-                var posLeft = npos - options.buffSize;
-                    
-                // setup new position
-                if (posLeft < -options.dragSize) { // to left
-                    datalev = currlev - (Math.round(Math.abs(posLeft) / options.stepSize));
-                } else if (posLeft > options.dragSize) { // to right
-                    datalev = currlev + (Math.round(posLeft / options.stepSize));
-                } else { // none
-                    datalev = currlev;
-                }
-
-                datalev = datalev < 0 ? 0 : datalev;
-                
-                if (prev.length) {
-                    var prevkey = prev.attr('data-id'),
-                        previdx = this.indexes[prevkey],
-                        prevdat = this.data[previdx],
-                        prevlev = +prevdat[params.level],
-                        prevpos;
-
-                    if (prevdat[params.leaf] == '1') {
-                        if (datalev > prevlev) {
-                            console.log('A');
-                            // as new child
-                            currdat.$parent = prevdat;
-                            currdat.$last = true;
-                            currdat[params.level] = prevlev + 1;
-
-                            prevdat.$child = [currkey];
-
-                            if (prevdat.$parent) {
-                                prevdat.$last = indexof(prevdat.$parent.$child, prevkey) == prevdat.$parent.$child.length - 1;
-                            } else {
-                                prevdat.$last = ! this.next(prevdat);
-                            }
-
-                            prevdat[params.leaf] = '0';
-                            prevdat[params.expand] = '1';
-
-                        } else if (datalev == prevlev) {
-                            // as sibling
-                            if (prevdat.$parent) {
-                                console.log('B');
-                                prevpos = indexof(prevdat.$parent.$child, prevkey);
-                                currdat.$parent = prevdat.$parent;
-                                currdat.$last = prevpos == prevdat.$parent.$child.length - 1;
-                                currdat[params.level] = datalev;
-                                
-                                prevdat.$last = false;
-                                prevdat.$parent.$child.splice(prevpos + 1, 0, currkey);
-                            } else {
-                                console.log('C');
-                                currdat.$parent = null;
-                                currdat.$last = this.data[curridx + 1] === false;
-                                currdat[params.level] = prevlev;
-
-                                prevdat.$last = false;
-                            }
-                        } else {
-                            console.log('D');
-                            // ugh... bubbling
-                            changed = this.bubbleMove(currdat, curridx, datalev, previdx);
-                        }
-                    } else {
-                        if (prevdat[params.expand] == '0') {
-                            if (datalev > prevlev || datalev == prevlev) {
-                                // as sibling
-                                if (prevdat.$parent) {
-                                    console.log('E');
-                                    prevpos = indexof(prevdat.$parent.$child, prevkey);
-                                    currdat.$parent = prevdat.$parent;
-                                    currdat.$last = prevpos == prevdat.$parent.$child.length - 1;
-                                    currdat[params.level] = prevlev;
-
-                                    prevdat.$last = false;
-                                    prevdat.$parent.$child.splice(prevpos + 1, 0, currkey);
-                                } else {
-                                    console.log('F');
-                                    currdat.$parent = null;
-                                    currdat.$last = this.data[curridx + 1] === false;
-                                    currdat[params.level] = prevlev;   
-                                }
-                            } else {
-                                console.log('G');
-                                // ugh... bubbling
-                                changed = this.bubbleMove(currdat, curridx, datalev, previdx);
-                            }
-                        } else {
-                            if (datalev > prevlev) {
-                                console.log('H');
-                                // as fists child
-                                currdat.$parent = prevdat;
-                                currdat.$last = false;
-                                currdat[params.level] = prevlev + 1;
-
-                                prevdat.$child.unshift(currkey);
-                            } else {
-                                console.log('I');
-                                changed = this.bubbleMove(currdat, curridx, datalev, previdx);
-                            }
-                        }
-                    }
-                } else if (next.length) {
-                    console.log('J');
-                    var nextkey = next.attr('data-id'),
-                        nextidx = this.indexes[nextkey],
-                        nextdat = this.data[nextidx];
-
-                    currdat.$parent = nextdat.$parent;
-                    currdat.$last = false;
-                    currdat[params.level] = nextdat[params.level];
-
-                } else {
-                    console.log('K');
-                    currdat.$parent = null;
-                    currdat.$last = true;
-                    currdat[params.level] = 0;
-                }
-
-                if (this.moving.desc) {
-                    var dlen = this.moving.desc.length, 
-                        width = +currdat[params.level] - currlev,
-                        i;
-                    for (i = 0; i < dlen; i++) {
-                        this.moving.desc[i][params.level] = +this.moving.desc[i][params.level] + width;
-                    }
-                }
-
-                this.moving.data = null;
-                this.moving.desc = [];
-                this.moving.orig = null;
-
-                this.render();
-
-                // prepare event
-                if (changed) {
-                    var position = {
-                        parent: this.parent(currdat),
-                        prev: this.prev(currdat),
-                        next: this.next(currdat)
-                    };
-                    this.fireEvent('move', currdat, position);    
-                }
-
-            }
-            
-        },
-
-        bubbleMove: function(currdat, curridx, offlev, offidx) {
-            var params = this.options.params,
-                currkey = currdat[params.id],
-                bubble = this.data[offidx],
-                prevs = [],
-                stop = offlev - 1,
-                bublev;
-
-            while(bubble) {
-                bublev = +bubble[params.level];
-                if (bublev == offlev) 
-                    prevs.push(bubble);
-                if (bublev == stop) 
-                    break;
-                bubble = this.data[offidx--];
-            }
-
-            var invalid = false,
-                isparent = currdat[params.leaf] == '0',
-                desc = [],
-                dlen,
-                didx,
-                next,
-                i;
-
-            if (isparent) {
-                if (currdat[params.expand] == '1') {
-                    desc = this.descendants(currdat);
-                    dlen = desc.length;
-                    didx = this.indexes[desc[dlen - 1][params.id]];
-                    next = this.data[didx + 1];
-                } else {
-                    next = this.data[curridx + 1];
-                }
-            } else {
-                next = this.data[curridx + 1];
-            }
-
-            if (next) {
-                invalid = +next[params.level] > offlev;
-            }
-
-            if ( ! invalid) {
-                var prevlen = prevs.length;
-                if (prevlen)
-                    for (i = 0; i < prevlen; i++) 
-                        prevs[i].$last = false;
-
-                if (bubble) {
-                    currdat.$parent = bubble;
-                    bubble.$child = bubble.$child || [];
-                    bubble.$child.splice(prevlen, 0, currkey);
-                    currdat.$last = prevlen === bubble.$child.length - 1;
-                    currdat[params.level] = offlev;
-                } else {
-                    currdat.$parent = null;
-                    currdat[params.level] = 0;
-                    
-                    next = this.next(currdat);
-                    if (next) currdat.$last = false;
-                }
-            } else {
-                // hard reset
-                var orig = this.moving.orig;
-
-                if (orig.$parent) {
-                    currdat.$parent = orig.$parent;
-                    if (orig.$parent.$child === undef) {
-                        orig.$parent.$child = [currkey];
-                        orig.$parent[params.leaf] = '0';
-                    } else {
-                        orig.$parent.$child.splice(orig.$posidx, 0, currkey);
-                    }
-                }
-
-                desc.unshift(currdat);
-
-                this.data.splice(curridx, desc.length);
-                Array.prototype.splice.apply(this.data, [orig.$index, 0].concat(desc));
-                this.reindex();
-            }
-
-            prevs = null;
-            return ! invalid;
-        },
-
-        /** @deprecated */
-        _moveData: function(from, to) {
-            this.data.splice(to, 0, this.data.splice(from, 1)[0]);
-            this.reindex();
-        },
-
-        /** @private */
-        moveData: function(from, to, reindex) {
-            var size = this.data.length, tmp, i;
+        /**
+         * Swap item
+         * @private
+         */
+        swap: function(from, to, reindex) {
+            var size = this._data.length, tmp, i;
             if (from != to && from >= 0 && from <= size && to >= 0 && to <= size) {
-                tmp = this.data[from];
+                tmp = this._data[from];
                 if (from < to) {
                     for (i = from; i < to; i++) {
-                        this.data[i] = this.data[i+1];
+                        this._data[i] = this._data[i+1];
                     }
                 } else {
                     for (i = from; i > to; i--) {
-                        this.data[i] = this.data[i-1];
+                        this._data[i] = this._data[i-1];
                     }
                 }
 
-                this.data[to] = tmp;
+                this._data[to] = tmp;
 
                 reindex = reindex === undef ? true : reindex;
-                if (reindex) this.reindex();
+                if (reindex) this._reindex();
             }
         },
-
-        // internal function
-        navigate: function(e) {
+        
+        /** @private */
+        _navigate: function(e) {
             var code = e.keyCode || e.which;
             
             if (code == 9 || code == 38 || code == 40) {
@@ -1165,6 +1473,17 @@
             
         },
 
+        maps: function() {
+            var args = $.makeArray(arguments),
+                size = args.length,
+                maps = this._data.map(function(d){
+                    var t = [], i = 0;
+                    for (; i < size; i++) t.push(d[args[i]]);
+                    return t;
+                });
+            console.log(maps);
+        },
+
         plugin: function() {
             return this;
         },
@@ -1184,25 +1503,34 @@
             }
         },
 
-        fireEvent: function() {
+        /** @private */
+        _fireEvent: function() {
             var args = $.makeArray(arguments),
-                name = args.shift() + '.bt';
+                name = (args.shift()) + '.bt';
             this.element.trigger(name, args);
         },
-        
+
+        _error: function(message) {
+            this._message = message;
+        },
+
+        _debug: function(message) {
+            if (this.options.debug) {
+                message = message === undef ? this._message : message;
+                console.log(message);    
+            }
+        },
+
         destroy: function(remove) {
-
             this.edtext.off('.bt');
-
             this.element.off('.bt');
             this.element.sortable('destroy');
 
-            $.removeData(this.element.get(0), 'bigtree');
+            $.removeData(this.element[0], 'bigtree');
 
-            this.data = null;
-            this.indexes = null;
-            this.orphans = null;
-            this.selected = null;
+            this._data = null;
+            this._indexes = null;
+            this._selected = null;
 
             if (remove !== undef && remove === true) {
                 this.editor.remove();

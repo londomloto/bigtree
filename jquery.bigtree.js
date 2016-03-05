@@ -575,10 +575,8 @@
                 this._attach(data, desc, 'append', owner);
                 
                 if (node.length) this.render();
-                return true;
             } else {
                 this._debug();
-                return false;
             }
         },
 
@@ -592,10 +590,8 @@
                 this._attach(data, desc, 'before', next);
 
                 if (node.length) this.render();
-                return true;
             } else {
                 this._debug();
-                return false;
             }
         },
 
@@ -609,19 +605,8 @@
                 this._attach(data, desc, 'after', prev);
 
                 if (node.length) this.render();
-                return true;
             } else {
                 this._debug();
-                return false;
-            }
-        },
-
-        move: function(data, type, dest) {
-            if (' append after before '.indexOf(type) > -1) {
-                return this[type].call(this, dest, data);
-            } else {
-                this._error("move(): unsupported move type");
-                return false;
             }
         },
 

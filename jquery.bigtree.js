@@ -122,14 +122,14 @@
     BigTree.defaults = {
 
         fields: {
-            id: 'wtt_id',
-            text: 'wtt_title',
-            left: 'wtt_left',
-            right: 'wtt_right',
-            level: 'wtt_depth',
-            leaf: 'wtt_is_leaf',
-            path: 'wtt_path',
-            expand: 'wtt_expanded'
+            id: 'id',
+            text: 'text',
+            left: 'left',
+            right: 'right',
+            level: 'level',
+            leaf: 'leaf',
+            path: 'path',
+            expand: 'expand'
         },
 
         // item height

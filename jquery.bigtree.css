@@ -100,12 +100,12 @@
 }
 
 .bt-node-elbow .elbow-expander.elbow-plus {
-	background-image: url(../bigtree/node-plus.png);
+	background-image: url(node-plus.png);
 	background-repeat: no-repeat;
 }
 
 .bt-node-elbow .elbow-expander.elbow-minus {
-	background-image: url(../bigtree/node-minus.png);
+	background-image: url(node-minus.png);
 	background-repeat: no-repeat;
 }
 
@@ -138,7 +138,7 @@
 
 .bt-drag {
 	width: 16px;
-	background: #ffffff url(../bigtree/grip.png) no-repeat 50% 50%;
+	background: #ffffff url(grip.png) no-repeat 50% 50%;
 	border: solid 1px #ccc;
 	border-width: 0 1px 0 0;
 	cursor: pointer;
@@ -185,7 +185,7 @@
 
 /** dragdrop */
 .bt-node-sortable.ui-sortable-placeholder {
-	background: #ffffff url(../bigtree/hand.png) no-repeat 5px 50%;
+	background: #ffffff url(hand.png) no-repeat 5px 50%;
 	height: 32px;
 	margin-left: -15px;
 	opacity: .5;

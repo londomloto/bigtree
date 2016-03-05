@@ -151,11 +151,11 @@
         buffer: 10,
 
         // node markup, can contains templating tags supported by jsRender
-        markup: '<div class="bt-node bt-hbox {{:~last($last)}}" '+
+        markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+
                     'data-id="{{:id}}" '+
                     'data-level="{{:level}}" '+
                     'data-leaf="{{:leaf}}">'+
-                    '{{for ~elbow(#data)}}'+
+                    '{{for _elbows}}'+
                         '<div class="bt-node-elbow {{:type}}">{{:icon}}</div>'+
                     '{{/for}}'+
                     '<div class="bt-node-body bt-flex bt-hbox">'+

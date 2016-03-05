@@ -325,7 +325,7 @@
             return this.element[0].scrollHeight > this.element.height();
         },
 
-        load: function(data) {
+        load: function(data, render) {
             var 
                 fields = this.options.fields,
                 start = this._data.length,
@@ -336,6 +336,10 @@
 
             this._reindex(start, stop);
             this._rebuild(start, stop);
+
+            render = render === undef ? false : render;
+            render && this.render();
+
         },
 
         /** @private */

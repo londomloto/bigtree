@@ -181,9 +181,6 @@
             this._indexes = {};
 
             this._visible = [];
-            this._ranges = [0, 0];
-            this._moving = null;
-            this._manual = false;
             this._message = '';
 
             this._initComponent();
@@ -238,7 +235,7 @@
 
             this.element
                 .off('scroll.bt')
-                .on('scroll.bt', $.debounce+(options.delay, $.proxy(function(){
+                .on('scroll.bt', $.debounce(options.delay, $.proxy(function(){
                     var 
                         currtop = this.element.scrollTop(),
                         currdir = currtop > lasttop ? 'down' : 'up';
@@ -246,7 +243,7 @@
                     scroll = lastdir != currdir ? 0 : (scroll + Math.abs(currtop - lasttop));
 
                     if (scroll === 0 || scroll >= (options.buffer * options.itemSize)) {
-                        if ( ! this._manual) this.render();
+                        this.render();
                         scroll = 0;
                     }
 
@@ -461,7 +458,6 @@
             }
 
             this._visible = range;
-            this._ranges  = [start, end];
 
             // create elbows for current range only
             for (var i = 0, size = range.length; i < size; i++) {
@@ -718,26 +714,26 @@
                 prev = node.prev('.bt-node'),
                 next = node.next('.bt-node');
 
-            var bubbling = function(current, start, level) {
+            var lookup = function(current, start, level) {
                 var 
                     siblings = [],
-                    bubble = stacks[start],
                     target = level - 1,
+                    look = stacks[start],
                     curr;
 
                 target = target < 0 ? 0 : target;
 
-                while(bubble) {
-                    curr = +bubble[fields.level];
-                    if (curr === level) siblings.push(bubble);
+                while(look) {
+                    curr = +look[fields.level];
+                    if (curr === level) siblings.push(look);
                     if (curr === target) break;
-                    bubble = stacks[--start];
+                    look = stacks[--start];
                 }
                 
                 if (siblings.length) {
                     return ['after', siblings[siblings.length - 1], current];
                 } else {
-                    return ['append', bubble, current];    
+                    return ['append', look, current];    
                 }
             };
 
@@ -778,7 +774,7 @@
                 } else if (dragLevel === prevLevel) {
                     args = ['after', prevData, data];
                 } else {
-                    args = bubbling(data, prevIndex, dragLevel);
+                    args = lookup(data, prevIndex, dragLevel);
                 }
             } else if (next.length) {
                 var nextData = this.dataof(next);
@@ -1069,8 +1065,8 @@
         },
 
         isvisible: function(data) {
-            var index = this.index(data);
-            return index >= this._ranges[0] && index <= this._ranges[1];
+            var stacks = this.visible();
+            return indexof(stacks, data) > -1;
         },
 
         first: function() {

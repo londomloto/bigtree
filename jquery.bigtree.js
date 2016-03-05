@@ -145,7 +145,7 @@
         buffSize: 20,
 
         // scroll delay
-        delay: 25,
+        delay: 10,
 
         // leading & trailing rendered nodes
         buffer: 10,
@@ -299,7 +299,7 @@
                 .on('click.bt.startedit', '.bt-text', $.proxy(function(e){
                     e.stopPropagation();
                     var node = $(e.currentTarget).closest('.bt-node');
-                    this.startEdit(node);
+                    this._startEdit(node);
                 }, this));
 
             // editor event
@@ -315,7 +315,7 @@
                 .on('keypress.bt', $.proxy(function(e){
                     if (e.keyCode == 13) {
                         e.preventDefault();
-                        this.stopEdit(false);
+                        this._stopEdit(false);
                     }
                 }, this));
 
@@ -409,6 +409,7 @@
         },
 
         render: function() {
+
             var 
                 buff = this.options.buffer * this.options.itemSize,
                 spix = this.grid.scrollTop() - this.grid.position().top - buff,
@@ -566,67 +567,61 @@
 
         append: function(owner, data) {
             if (this._isvalid(data, 'append', owner)) {
-                if (this.isphantom(data)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(owner);
 
-                } else {
-                    var 
-                        desc = this.descendants(data),
-                        node = this.nodeof(owner);
-
-                    this._detach(data, desc);
-                    this._attach(data, desc, 'append', owner);
-                    
-                    if (node.length) {
-                        this.render();
-                    }
-                }
+                this._detach(data, desc);
+                this._attach(data, desc, 'append', owner);
+                
+                if (node.length) this.render();
+                return true;
             } else {
                 this._debug();
+                return false;
             }
         },
 
         before: function(next, data) {
             if (this._isvalid(data, 'before', next)) {
-                if (this.isphantom(data)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(next);
 
-                } else {
-                    var 
-                        desc = this.descendants(data),
-                        node = this.nodeof(next);
+                this._detach(data, desc);
+                this._attach(data, desc, 'before', next);
 
-                    this._detach(data, desc);
-                    this._attach(data, desc, 'before', next);
-
-                    if (node.length) {
-                        this.render();    
-                    }
-                }
+                if (node.length) this.render();
+                return true;
             } else {
                 this._debug();
+                return false;
             }
         },
 
         after: function(prev, data) {
             if (this._isvalid(data, 'after', prev)) {
-                // var fields = this.options.fields;
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(prev);
 
-                if (this.isphantom(data)) {
-                    
-                } else {
-                    var 
-                        desc = this.descendants(data),
-                        node = this.nodeof(prev);
+                this._detach(data, desc);
+                this._attach(data, desc, 'after', prev);
 
-                    this._detach(data, desc);
-                    this._attach(data, desc, 'after', prev);
-
-                    if (node.length) {
-                        this.render();    
-                    }
-                }
-
+                if (node.length) this.render();
+                return true;
             } else {
                 this._debug();
+                return false;
+            }
+        },
+
+        move: function(data, type, dest) {
+            if (' append after before '.indexOf(type) > -1) {
+                return this[type].call(this, dest, data);
+            } else {
+                this._error("move(): unsupported move type");
+                return false;
             }
         },
 
@@ -636,6 +631,11 @@
 
             if (this.isphantom(dest)) {
                 this._error(type + "(): offset data doesn't exists!");
+                return false;
+            }
+
+            if (this.isparent(data)) {
+                this._error(type + "(): data doesn't exists!");
                 return false;
             }
 
@@ -668,13 +668,20 @@
                         this._error("after(): nothing to move!");
                         return false;
                     }
+
                 break;
 
                 case 'append':
                     var child = dest._child || [];
+
                     if (child[child.length - 1] == data[fields.id]) {
                         this._error("append(): nothing to move!");
                         return false;
+                    }
+
+                    if ( ! this.isexpanded(dest)) {
+                        this._error("append(): can't append to collapsed data!");
+                        return false; 
                     }
                 break;
             }
@@ -771,7 +778,11 @@
 
                 if (dragLevel > prevLevel) {
                     if (prevChild.length) {
-                        args = ['before', this.get(prevChild[0]), data];
+                        if ( ! this.isexpanded(prevData)) {
+                            args = ['after', prevData, data];
+                        } else {
+                            args = ['before', this.get(prevChild[0]), data];    
+                        }
                     } else {
                         args = ['append', prevData, data];
                     }
@@ -784,7 +795,8 @@
                 var nextData = this.dataof(next);
                 args = ['before', nextData, data];
             } else {
-                this.render();
+                debug('move', 'nothing to move');
+                // this.render();
             }
 
             if (args.length) {
@@ -806,9 +818,9 @@
                 size = descs.length;
 
             if (offset > -1) {
-                this._data.splice(offset, 1);
-                delete this._indexes[data[fields.id]];
-                
+
+                data._origin = null;
+
                 var 
                     owner = data._parent || null, 
                     regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
@@ -824,7 +836,14 @@
                             owner[fields.leaf] = '1';
                         }
                     }
+                    data._origin = owner;
+                } else {
+                    var prev = this.prev(data);
+                    if (prev) data._origin = prev; 
                 }
+
+                this._data.splice(offset, 1);
+                delete this._indexes[data[fields.id]];
 
                 data._parent = null;
                 data._root   = null;
@@ -933,6 +952,14 @@
                 }
                 
                 this._reindex(offset);
+
+                var origin, oidx;
+
+                if ((origin = data._origin)) {
+                    oidx = this.index(origin);
+                    if (oidx < bindex) bindex = oidx;
+                    delete data._origin;
+                }
 
                 // update like SQL
                 var 
@@ -1306,7 +1333,7 @@
         },
 
         /** @private */
-        startEdit: function(node) {
+        _startEdit: function(node) {
             var 
                 data = this._data[this._indexes[node.attr('data-id')]],
                 fields = this.options.fields,
@@ -1319,7 +1346,7 @@
             }
 
             // drop previous editing
-            this.stopEdit(true);
+            this._stopEdit(true);
 
             // ensure selection
             this.select(node);
@@ -1337,7 +1364,7 @@
         },
 
         /** @private */
-        stopEdit: function(deselect) {
+        _stopEdit: function(deselect) {
             var 
                 fields = this.options.fields,
                 node = this.editor.closest('.bt-node');
@@ -1488,17 +1515,17 @@
                         case 9:
                             var method = e.shiftKey ? 'prev' : 'next',
                                 target = node[method].call(node);
-                            if (target.length) this.startEdit(target);
+                            if (target.length) this._startEdit(target);
                             break;
                         // up
                         case 38:
                             prev = node.prev('.bt-node');
-                            if (prev.length) this.startEdit(prev);
+                            if (prev.length) this._startEdit(prev);
                             break;
                         // down
                         case 40:
                             next = node.next('.bt-node');
-                            if (next.length) this.startEdit(next);
+                            if (next.length) this._startEdit(next);
                             break;
 
                     }    

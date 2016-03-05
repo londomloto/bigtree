@@ -196,7 +196,7 @@
 
             this.element.addClass('bigtree').attr('tabindex', 1);
 
-            this.editor = $('<div class="bt-e*-ditor"><input type="text"></div>');
+            this.editor = $('<div class="bt-editor"><input type="text"></div>');
             this.edtext = this.editor.children('input');
 
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);

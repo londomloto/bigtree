@@ -84,7 +84,8 @@
     }
 
     function debug() {
-        var args = $.makeArray(arguments),
+        var 
+            args = $.makeArray(arguments),
             arr = ['[' + args.shift() + ']'];
 
         for (var i = 0, j = args.length; i < j; i++) {
@@ -192,12 +193,13 @@
 
         /** @private */
         _initComponent: function() {
-            var options = this.options,
+            var 
+                options = this.options,
                 fields = options.fields;
 
             this.element.addClass('bigtree').attr('tabindex', 1);
 
-            this.editor = $('<div class="bt-editor"><input type="text"></div>');
+            this.editor = $('<div class="bt-e*-ditor"><input type="text"></div>');
             this.edtext = this.editor.children('input');
 
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);
@@ -220,13 +222,15 @@
 
         /** @private */
         _initEvents: function() {
-            var options = this.options,
+            var 
+                options = this.options,
                 lasttop = this.element.scrollTop(),
                 lastdir = '',
                 scroll = 0;
 
             $('.task-search').on('click', $.proxy(function(){
-                var a = prompt('action', 'append'),
+                var 
+                    a = prompt('action', 'append'),
                     b = prompt(a),
                     c = prompt('data');
                 this[a].call(this, this._data[+b], this._data[+c]);
@@ -234,8 +238,9 @@
 
             this.element
                 .off('scroll.bt')
-                .on('scroll.bt', $.throttle(options.delay, $.proxy(function(){
-                    var currtop = this.element.scrollTop(),
+                .on('scroll.bt', $.debounce+(options.delay, $.proxy(function(){
+                    var 
+                        currtop = this.element.scrollTop(),
                         currdir = currtop > lasttop ? 'down' : 'up';
 
                     scroll = lastdir != currdir ? 0 : (scroll + Math.abs(currtop - lasttop));
@@ -254,7 +259,8 @@
                 .off('click.bt.expander')
                 .on('click.bt.expander', '.elbow-expander', $.proxy(function(e){
                     e.stopPropagation();
-                    var node = $(e.currentTarget).closest('.bt-node'),
+                    var 
+                        node = $(e.currentTarget).closest('.bt-node'),
                         data = this.get(node.attr('data-id'));
                     if (data) {
                         if (this.isexpanded(data)) {
@@ -323,7 +329,8 @@
         },
 
         load: function(data) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 start = this._data.length,
                 stop;
 
@@ -348,7 +355,8 @@
 
         /** @private */
         _rebuild: function(start, stop) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 root = null,
                 i;
             
@@ -400,17 +408,16 @@
         },
 
         render: function() {
-            console.log('called');
-            var stop = this.grid.scrollTop(),
-                ptop = this.grid.position().top,
+            var 
                 buff = this.options.buffer * this.options.itemSize,
-                spix = stop - ptop - buff,
+                spix = this.grid.scrollTop() - this.grid.position().top - buff,
                 epix = spix + this.element.height() + buff * 2,
                 data = $.grep(this._data, function(d){ return !d._hidden; });
             
             spix = spix < 0 ? 0 : spix;
 
-            var begidx = Math.floor(spix / this.options.itemSize),
+            var 
+                begidx = Math.floor(spix / this.options.itemSize),
                 endidx = Math.ceil(epix / this.options.itemSize),
                 padtop = this.options.itemSize * begidx,
                 padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
@@ -426,19 +433,21 @@
         },
 
         scroll: function(data) {
-            var options = this.options,
-                stacks = $.grep(this._data, function(d){ return ! d._hidden; }),
-                scroll = indexof(stacks, data) * options.itemSize,
+            var 
+                options = this.options,
+                stacks  = $.grep(this._data, function(d){ return ! d._hidden; }),
+                scroll  = indexof(stacks, data) * options.itemSize,
                 element = this.element;
-                
+
             element.animate({scrollTop: scroll}, scroll);
         },
 
         /** @private */
         _renderRange: function(data, start, end) {
-            var range = data.slice(start, end),
+            var 
+                range  = data.slice(start, end),
                 fields = this.options.fields,
-                moved = this.movedNode();
+                moved  = this.movedNode();
 
             this._fireEvent('beforenodesrender');
 
@@ -456,7 +465,8 @@
 
             // create elbows for current range only
             for (var i = 0, size = range.length; i < size; i++) {
-                var data = range[i], 
+                var 
+                    data = range[i], 
                     owner = data._parent,
                     level = +data[fields.level],
                     isparent = +data[fields.leaf] === 0,
@@ -559,7 +569,8 @@
                 if (this.isphantom(data)) {
 
                 } else {
-                    var desc = this.descendants(data),
+                    var 
+                        desc = this.descendants(data),
                         node = this.nodeof(owner);
 
                     this._detach(data, desc);
@@ -579,7 +590,8 @@
                 if (this.isphantom(data)) {
 
                 } else {
-                    var desc = this.descendants(data),
+                    var 
+                        desc = this.descendants(data),
                         node = this.nodeof(next);
 
                     this._detach(data, desc);
@@ -601,7 +613,8 @@
                 if (this.isphantom(data)) {
                     
                 } else {
-                    var desc = this.descendants(data),
+                    var 
+                        desc = this.descendants(data),
                         node = this.nodeof(prev);
 
                     this._detach(data, desc);
@@ -670,7 +683,8 @@
         },
 
         _beforeDrag: function(node) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 data = this.dataof(node);
 
             this.deselectAll();
@@ -679,7 +693,8 @@
             node.addClass('bt-moving');
 
             if (data) {
-                var isexpand = +data[fields.expand] === 1,
+                var 
+                    isexpand = +data[fields.expand] === 1,
                     desc = this.descendants(data),
                     size = desc.length,
                     attr;
@@ -694,7 +709,8 @@
         },
 
         _afterDrag: function(node, offset) {
-            var options = this.options,
+            var 
+                options = this.options,
                 indexes = this._indexes,
                 fields = options.fields,
                 stacks = this._data,
@@ -703,7 +719,8 @@
                 next = node.next('.bt-node');
 
             var bubbling = function(current, start, level) {
-                var siblings = [],
+                var 
+                    siblings = [],
                     bubble = stacks[start],
                     target = level - 1,
                     curr;
@@ -727,7 +744,8 @@
             node.removeClass('bt-moving');
             
             // define level
-            var dataLevel = +data[fields.level],
+            var 
+                dataLevel = +data[fields.level],
                 dragLevel = 0,
                 tolerance = 5,
                 args = [];
@@ -745,7 +763,8 @@
             dragLevel = dragLevel < 0 ? 0 : dragLevel;
 
             if (prev.length) {
-                var prevData = this.dataof(prev),
+                var 
+                    prevData = this.dataof(prev),
                     prevLevel = this.level(prevData),
                     prevIndex = this.index(prevData),
                     prevChild = prevData._child || [];
@@ -781,7 +800,8 @@
 
         /** @private */
         _detach: function(data, descs) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 offset = this.index(data),
                 size = descs.length;
 
@@ -789,7 +809,8 @@
                 this._data.splice(offset, 1);
                 delete this._indexes[data[fields.id]];
                 
-                var owner = data._parent || null, 
+                var 
+                    owner = data._parent || null, 
                     regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
                     retrm = new RegExp('^/');
                     level = +data[fields.level];
@@ -832,7 +853,8 @@
 
         /** @private */
         _attach: function(data, descs, type, dest) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 dsize = descs.length,
                 offset = -1,
                 prefix = '',
@@ -861,7 +883,7 @@
 
                     offset += this.descendants(dest).length + 1;
 
-                break;
+                    break;
 
                 case 'before':
                     offset = this.index(dest);
@@ -874,7 +896,8 @@
                         prefix = owner[fields.path] + '/';
                         bindex = this.index(owner);
                     }
-                break;
+
+                    break;
 
                 case 'append':
                     prefix = dest[fields.path] + '/';
@@ -890,7 +913,7 @@
                         dest[fields.leaf] = '0';
                     }
 
-                break;
+                    break;
             }
 
             if (offset > -1) {
@@ -912,7 +935,8 @@
                 this._reindex(offset);
 
                 // update like SQL
-                var p = pos,
+                var 
+                    p = pos,
                     l = +data[fields.left],
                     r = +data[fields.right],
                     j = this._data.length,
@@ -1062,7 +1086,8 @@
         },
 
         prev: function(data) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 owner = data._parent,
                 found = null,
                 index;
@@ -1091,7 +1116,8 @@
         },
 
         next: function(data) {
-            var fields = this.options.fields, 
+            var 
+                fields = this.options.fields, 
                 owner = data._parent, 
                 found = null,
                 index;
@@ -1119,7 +1145,8 @@
         },
 
         descendants: function(data) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 start = this._indexes[data[fields.id]],
                 next = this._data[++start],
                 desc = [],
@@ -1135,7 +1162,8 @@
         },
 
         children: function(data) {
-            var child = data._child || [],
+            var 
+                child = data._child || [],
                 len = child.length,
                 arr = [];
 
@@ -1188,7 +1216,8 @@
         },
 
         expand: function(data) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 fshow = function(data) {
                     var ds = this.children(data),
                         dz = ds.length;
@@ -1208,7 +1237,8 @@
         },
 
         collapse: function(data) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 fhide = function(data) {
                     var ds = this.children(data),
                         dz = ds.length;
@@ -1277,7 +1307,8 @@
 
         /** @private */
         startEdit: function(node) {
-            var data = this._data[this._indexes[node.attr('data-id')]],
+            var 
+                data = this._data[this._indexes[node.attr('data-id')]],
                 fields = this.options.fields,
                 holder = node.find('.bt-text'),
                 text = data[fields.text];
@@ -1307,11 +1338,13 @@
 
         /** @private */
         stopEdit: function(deselect) {
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 node = this.editor.closest('.bt-node');
                 
             if (node.length) {
-                var data = this._data[this._indexes[node.attr('data-id')]],
+                var 
+                    data = this._data[this._indexes[node.attr('data-id')]],
                     text = this.edtext.val(),
                     orig = data[fields.text],
                     disp = text;
@@ -1344,7 +1377,8 @@
 
         query: function(query) {
 
-            var fields = this.options.fields,
+            var 
+                fields = this.options.fields,
                 regex = new RegExp('('+query+')', 'igm'),
                 size = this._data.length,
                 text,
@@ -1440,7 +1474,8 @@
             var code = e.keyCode || e.which;
             
             if (code == 9 || code == 38 || code == 40) {
-                var node = this.grid.find('.bt-selected'),
+                var 
+                    node = this.grid.find('.bt-selected'),
                     next,
                     prev;
 
@@ -1454,17 +1489,17 @@
                             var method = e.shiftKey ? 'prev' : 'next',
                                 target = node[method].call(node);
                             if (target.length) this.startEdit(target);
-                        break;
+                            break;
                         // up
                         case 38:
                             prev = node.prev('.bt-node');
                             if (prev.length) this.startEdit(prev);
-                        break;
+                            break;
                         // down
                         case 40:
                             next = node.next('.bt-node');
                             if (next.length) this.startEdit(next);
-                        break;
+                            break;
 
                     }    
                 }
@@ -1474,7 +1509,8 @@
         },
 
         maps: function() {
-            var args = $.makeArray(arguments),
+            var 
+                args = $.makeArray(arguments),
                 size = args.length,
                 maps = this._data.map(function(d){
                     var t = [], i = 0;
@@ -1541,7 +1577,8 @@
     };
 
     $.fn.bigtree = function(options) {
-        var args = $.makeArray(arguments),
+        var 
+            args = $.makeArray(arguments),
             init = $.type(args[0]) !== 'string',
             list,
             func;

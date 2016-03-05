@@ -10,7 +10,7 @@ High performance hierarchical data rendering based on nested set model (can also
   * Keyboard navigation
 
 ## Working Demo
-[Demo](http://codepen.io/anon/pen/YqyjOJ)
+[Demo](http://liveweave.com/aw2hSQ)
 
 ## Example Usages
 1. Include library

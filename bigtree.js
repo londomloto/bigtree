@@ -316,8 +316,9 @@
         _rebuild: function(start, stop) {
             var 
                 fields = this.options.fields,
-                root = null,
-                i;
+                root = null;
+
+            var i;
             
             start = start === undef ? 0 : start;
             stop  = stop  === undef ? this._data.length : stop;
@@ -327,7 +328,8 @@
             }
 
             for (i = start; i < stop; i++) {
-                var cur = this._data[i],
+                var 
+                    cur = this._data[i],
                     key = cur[fields.id];
 
                 // actualy prepare for metadata
@@ -364,9 +366,7 @@
 
                     par._child.push(cur[fields.id]);
                 }
-
-                console.log(cur);
-
+                
             }
         },
         /** @private */
@@ -397,11 +397,9 @@
                     isparent = +data[fields.leaf] === 0,
                     isexpand = +data[fields.expand] === 1,
                     lines = [],
-                    elbows = [],
-                    type,
-                    icon,
-                    cls,
-                    j;
+                    elbows = [];
+
+                var type, icon, cls, j;
                     
                 while(owner) {
                     lines[owner[fields.level]] = owner._last ? 0 : 1;
@@ -436,7 +434,8 @@
                 this._decorate();
             }
 
-            var visdata = this.visible(),
+            var 
+                visdata = this.visible(),
                 visnode = this.visibleNodes();
 
             this._fireEvent('nodesrender', visnode, visdata);
@@ -457,11 +456,6 @@
                 return false;
             }
 
-            if (this.isphantom(data)) {
-                this._error(type + "(): data doesn't exists!");
-                return false;
-            }
-
             if (dest[fields.id] == data[fields.id]) {
                 this._error(type + "(): can't move to itself!");
                 return false;
@@ -476,7 +470,8 @@
                 case 'before':
                     if (
                         this.index(dest) - this.descendants(data).length - 1 == this.index(data) && 
-                        data[fields.level] == dest[fields.level]
+                        data[fields.level] == dest[fields.level] && 
+                        ! this.isphantom(data)
                     ){
                         this._error("before(): nothing to move!");
                         return false;
@@ -486,7 +481,8 @@
                 case 'after':
                     if (
                         this.index(dest) + this.descendants(dest).length + 1 == this.index(data) && 
-                        data[fields.level] == dest[fields.level]
+                        data[fields.level] == dest[fields.level] && 
+                        ! this.isphantom(data)
                     ){
                         this._error("after(): nothing to move!");
                         return false;
@@ -497,7 +493,7 @@
                 case 'append':
                     var child = dest._child || [];
 
-                    if (child[child.length - 1] == data[fields.id]) {
+                    if (child[child.length - 1] == data[fields.id] && ! this.isphantom(data)) {
                         this._error("append(): nothing to move!");
                         return false;
                     }
@@ -733,6 +729,82 @@
 
             }
         },
+        _insert: function(data, type, dest) {
+            var fields = this.options.fields;
+            var level, index, child, chpos, pos, d;
+
+            switch(type) {
+                case 'append':
+                    data._last   = true;
+                    data._root   = dest._root;
+                    data._parent = dest;
+
+                    dest[fields.leaf] = 0;
+                    data[fields.path] = dest[fields.path] + '/' + data[fields.id];
+                    data[fields.level] = +dest[fields.level] + 1;
+
+                    dest._child = dest._child || [];
+
+                    if (dest._child.length) {
+                        index = this.index(this.get(dest._child[dest._child.length - 1])) + 1;
+                    } else {
+                        index = this.index(dest) + 1;
+                    }
+
+                    dest._child.push(data);
+
+                    pos = +dest[fields.right];
+
+                    break;
+                case 'before':
+
+                    data[fields.left] = dest[fields.left];
+                    data[fields.right] = dest[fields.right];
+                    data[fields.level] = dest[fields.level];
+
+                    data._last = false;
+                    data._root = dest._root;
+                    data._parent = dest._parent;
+
+                    index = this.index(dest);
+                    pos   = this.left(dest);
+
+                    if (data._parent) {
+                        child  = data._parent._child || [];
+                        chpos = indexof(child, dest[fields.id]);
+                        chpos = chpos < -1 ? 0 : chpos;
+                        child.splice(chpos, 0, data);
+
+                        data[fields.path] = data._parent[fields.path] + '/' + data[fields.id];
+                    } else {
+                        data[fields.path] = data[fields.id];
+                    }
+
+                    break;
+                case 'after':
+                    break;
+            }
+
+            // create new space for subtree
+            for (var i = 0, ii = this._data.length; i < ii; i++) {
+                d = this._data[i];
+                if (d[fields.left] >= pos) {
+                    d[fields.left] = +d[fields.left] + 2;
+                }
+                if (d[fields.right] >= pos) {
+                    d[fields.right] = +d[fields.right] + 2;
+                }
+            }
+
+            data[fields.left]  = pos;
+            data[fields.right] = pos + 1;
+
+            this._data.splice(index, 0, data);
+
+            this._reindex();
+            this._rebuild(); // TODO: check offset...
+
+        },
         /** @private */
         _startEdit: function(node) {
             var 
@@ -861,15 +933,14 @@
             return this._visible;
         },
         create: function(spec) {
-
             if ( ! spec) {
                 this._error("create(): spec doesn't meet requirement!");
                 return false;
             }
 
-            // fill with default specs
+            // setup structure
             var fields = this.options.fields,
-                uuid = this._guid(),
+                guid = this._guid(),
                 prop,
                 key;
 
@@ -878,11 +949,7 @@
                 if (spec[key] === undef) {
                     switch(prop) {
                         case 'id':
-                        case 'path':
-                            spec[key] = uuid;
-                            break;
-                        case 'level':
-                            spec[key] = 0;
+                            spec[key] = guid;
                             break;
                         case 'leaf':
                         case 'expand':
@@ -894,20 +961,38 @@
                 }
             }
 
-            // find first data
-            var first = this.first();
+            // setup metadata
+            spec._hidden = false;
+            
+            var 
+                owner = this.selection(),
+                first = this.first(),
+                result = true;
 
-            if (first) {
-                spec[fields.left]  = first[fields.left];
-                spec[fields.right] = first[fields.right];
-                this._data.unshift(spec);
+            if (owner) {
+                result = this.append(owner, spec);
+            } else if (first) {
+                this._selected = guid;
+                result = this.before(first, spec);
             } else {
                 spec[fields.left]  = 1;
                 spec[fields.right] = 2;
-                this._data.push(spec);
+                spec._root = null;
+                spec._parent = null;
+                spec._last = true;
+
+                this._data.unshift(spec);
+
+                this._reindex();
+                this._rebuild();
+                this.render();
+
+                render = true;
+                result = true;
             }
-            this._reindex();
-            this.render();
+
+            this._debug();
+            return result;
         },
         remove: function(data) {
             data = data || {};
@@ -918,31 +1003,34 @@
         },
         append: function(owner, data) {
             if (this._isvalid(data, 'append', owner)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(owner);
-
-                this._detach(data, desc);
-                this._attach(data, desc, 'append', owner);
-                
+                var node = this.nodeof(owner), desc;
+                if (this.isphantom(data)) {
+                    this._insert(data, 'append', owner);
+                } else {
+                    desc = this.descendants(data);
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'append', owner);
+                }
                 if (node.length) this.render();
-            } else {
-                this._debug();
+                return true;
             }
+            return false;
         },
         before: function(next, data) {
             if (this._isvalid(data, 'before', next)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(next);
-
-                this._detach(data, desc);
-                this._attach(data, desc, 'before', next);
+                var node = this.nodeof(next), desc;
+                if (this.isphantom(data)) {
+                    this._insert(data, 'before', next);
+                } else {
+                    desc = this.descendants(data);
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'before', next);
+                }
 
                 if (node.length) this.render();
-            } else {
-                this._debug();
+                return true;
             }
+            return false;
         },
         after: function(prev, data) {
             if (this._isvalid(data, 'after', prev)) {
@@ -954,9 +1042,9 @@
                 this._attach(data, desc, 'after', prev);
 
                 if (node.length) this.render();
-            } else {
-                this._debug();
+                return true;
             }
+            return false;
         },
         get: function(key) {
             var index = this._indexes[key];
@@ -1490,18 +1578,20 @@
                 var nextData = this.dataof(next);
                 args = ['before', nextData, data];
             } else {
-                debug('move', 'nothing to move');
-                // this.render();
+                this._error('move(): nothing to move!');
             }
 
             if (args.length) {
-                var action = args.shift();
-                this[action].apply(this, args);
-
-                if ( ! this.isvisible(data)) {
-                    this.scroll(data);
+                var action = args.shift(),
+                    result = this[action].apply(this, args);
+                
+                if (result) {
+                    if ( ! this.isvisible(data)) this.scroll(data);
+                } else {
+                    this._debug();
                 }
-
+            } else {
+                this._debug();
             }
         },
         _error: function(message) {

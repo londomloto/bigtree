@@ -10,6 +10,14 @@ High performance hierarchical data rendering based on nested set model (pre-orde
 * Keyboard navigation
 * User plugins
 
+## Dependencies
+
+__Bigtree__ is jQuery plugin that relies on libraries:
+* [jQuery](http://code.jquery.com/jquery-2.2.1.min.js)
+* [jQuery UI](http://jqueryui.com/resources/download/jquery-ui-1.11.4.zip)
+* [jQuery Throttle & Debounce](http://github.com/cowboy/jquery-throttle-debounce/raw/v1.1/jquery.ba-throttle-debounce.min.js)
+* [jsRender](https://www.jsviews.com/download/jsrender.min.js)
+
 ## Working Demo
 On progress...
 

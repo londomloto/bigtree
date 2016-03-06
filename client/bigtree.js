@@ -23,7 +23,7 @@
             + ')>',
             'gi'
         );*/
-
+    
     /**
      * Cast element to jQuery object
      */
@@ -173,21 +173,42 @@
      * Prototype
      */
     BigTree.prototype = {
-
         init: function(options) {
 
             this.options = $.extend(true, {}, BigTree.defaults, options || {});
+
             this._data = [];
             this._indexes = {};
 
             this._visible = [];
             this._message = '';
+            this._uuid = []; 
 
             this._initComponent();
             this._initEvents();
             this._fireEvent('init');
-        },
 
+        },
+        _guid: function() {
+
+            if ( ! this._uuid.length)
+                for (var i = 0; i < 256; i++)
+                    this._uuid[i] = (i < 16 ? '0' : '') + (i).toString(16);
+
+            var 
+                uu = this._uuid,
+                d0 = Math.random()*0xffffffff|0,
+                d1 = Math.random()*0xffffffff|0,
+                d2 = Math.random()*0xffffffff|0,
+                d3 = Math.random()*0xffffffff|0;
+
+            return uu[d0&0xff]+uu[d0>>8&0xff]+uu[d0>>16&0xff]+uu[d0>>24&0xff]+
+                uu[d1&0xff]+uu[d1>>8&0xff]+
+                uu[d1>>16&0x0f|0x40]+uu[d1>>24&0xff]+
+                uu[d2&0x3f|0x80]+uu[d2>>8&0xff]+
+                uu[d2>>16&0xff]+uu[d2>>24&0xff]+
+                uu[d3&0xff]+uu[d3>>8&0xff]+uu[d3>>16&0xff]+uu[d3>>24&0xff];
+        },
         /** @private */
         _initComponent: function() {
             var 
@@ -214,77 +235,38 @@
                 handle: '.bt-drag',
                 placeholder: 'bt-node-sortable ui-sortable-placeholder'
             });
-
         },
-
         /** @private */
         _initEvents: function() {
-            var 
-                options = this.options,
-                lasttop = this.element.scrollTop(),
-                lastdir = '',
-                scroll = 0;
+            var options = this.options;
 
-            $('.task-search').on('click', $.proxy(function(){
-                var 
-                    a = prompt('action', 'append'),
-                    b = prompt(a),
-                    c = prompt('data');
-                this[a].call(this, this._data[+b], this._data[+c]);
-            }, this));
+            this._scrollTop = this.element.scrollTop();
+            this._scrollDir = '';
+            this._scrollDif = 0;
 
+            // scroll
             this.element
                 .off('scroll.bt')
-                .on('scroll.bt', $.debounce(options.delay, $.proxy(function(){
-                    var 
-                        currtop = this.element.scrollTop(),
-                        currdir = currtop > lasttop ? 'down' : 'up';
-
-                    scroll = lastdir != currdir ? 0 : (scroll + Math.abs(currtop - lasttop));
-
-                    if (scroll === 0 || scroll >= (options.buffer * options.itemSize)) {
-                        this.render();
-                        scroll = 0;
-                    }
-
-                    lasttop = currtop;
-                    lastdir = currdir;
-                }, this)));
+                .on('scroll.bt', $.debounce(options.delay, $.proxy(this._onScroll, this)));
 
             // expander click
             this.element
                 .off('click.bt.expander')
-                .on('click.bt.expander', '.elbow-expander', $.proxy(function(e){
-                    e.stopPropagation();
-                    var 
-                        node = $(e.currentTarget).closest('.bt-node'),
-                        data = this.get(node.attr('data-id'));
-                    if (data) {
-                        if (this.isexpanded(data)) {
-                            this.collapse(data);
-                        } else {
-                            this.expand(data);
-                        }
-                    }
-                }, this));
+                .on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
 
             // navigation
             this.element
                 .off('keydown.bt')
-                .on('keydown.bt', $.proxy(this._navigate, this));
+                .on('keydown.bt', $.proxy(this._onNavigate, this));
 
             // handle dragdrop event
             this.element
                 .off('sortstart.bt')
-                .on('sortstart.bt', $.proxy(function(e, ui){
-                    this._beforeDrag(ui.item);
-                }, this));
+                .on('sortstart.bt', $.proxy(this._onBeforeDrag, this));
 
             this.element
                 .off('sortstop.bt')
-                .on('sortstop.bt', $.proxy(function(e, ui){
-                    this._afterDrag(ui.item, ui.position.left);
-                }, this));
+                .on('sortstop.bt', $.proxy(this._onAfterDrag, this));
             
             // selection
             this.element
@@ -318,30 +300,7 @@
                         this._stopEdit(false);
                     }
                 }, this));
-
         },
-
-        hasScroll: function() {
-            return this.element[0].scrollHeight > this.element.height();
-        },
-
-        load: function(data, render) {
-            var 
-                fields = this.options.fields,
-                start = this._data.length,
-                stop;
-
-            this._data.push.apply(this._data, (data || []));
-            stop = this._data.length;
-
-            this._reindex(start, stop);
-            this._rebuild(start, stop);
-
-            render = render === undef ? false : render;
-            render && this.render();
-
-        },
-
         /** @private */
         _reindex: function(start, stop) {
             var fields = this.options.fields, i;
@@ -353,7 +312,6 @@
                 this._indexes[this._data[i][fields.id]] = i;
             }
         },
-
         /** @private */
         _rebuild: function(start, stop) {
             var 
@@ -372,6 +330,10 @@
                 var cur = this._data[i],
                     key = cur[fields.id];
 
+                // actualy prepare for metadata
+                cur._elbows = [];
+                cur._level  = 0;
+
                 if (+cur[fields.level] === 0) {
                     if (root) {
                         root._last = false;
@@ -381,7 +343,6 @@
                     cur._parent = null;
                     cur._last   = true;
                     cur._hidden = false;
-                    cur._elbows = [];
 
                     root = cur;
                 } else  {
@@ -400,50 +361,14 @@
                     cur._parent = par;
                     cur._last   = true;
                     cur._hidden = +par[fields.expand] === 0 || par._hidden;
-                    cur._elbows = [];
 
                     par._child.push(cur[fields.id]);
                 }
 
+                console.log(cur);
+
             }
         },
-
-        render: function() {
-
-            var 
-                buff = this.options.buffer * this.options.itemSize,
-                spix = this.grid.scrollTop() - this.grid.position().top - buff,
-                epix = spix + this.element.height() + buff * 2,
-                data = $.grep(this._data, function(d){ return !d._hidden; });
-            
-            spix = spix < 0 ? 0 : spix;
-
-            var 
-                begidx = Math.floor(spix / this.options.itemSize),
-                endidx = Math.ceil(epix / this.options.itemSize),
-                padtop = this.options.itemSize * begidx,
-                padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
-
-            this.grid.css({
-                paddingTop: padtop,
-                paddingBottom: padbtm
-            });
-
-            // this.tickStart('render');
-            this._renderRange(data, begidx, endidx);
-            // this.tickStop('render');
-        },
-
-        scroll: function(data) {
-            var 
-                options = this.options,
-                stacks  = $.grep(this._data, function(d){ return ! d._hidden; }),
-                scroll  = indexof(stacks, data) * options.itemSize,
-                element = this.element;
-
-            element.animate({scrollTop: scroll}, scroll);
-        },
-
         /** @private */
         _renderRange: function(data, start, end) {
             var 
@@ -464,7 +389,6 @@
 
             this._visible = range;
 
-            // create elbows for current range only
             for (var i = 0, size = range.length; i < size; i++) {
                 var 
                     data = range[i], 
@@ -478,7 +402,7 @@
                     icon,
                     cls,
                     j;
-
+                    
                 while(owner) {
                     lines[owner[fields.level]] = owner._last ? 0 : 1;
                     owner = owner._parent;
@@ -517,7 +441,6 @@
 
             this._fireEvent('nodesrender', visnode, visdata);
         },
-
         /** @private */
         _decorate: function() { 
             if (this._selected) {
@@ -525,101 +448,16 @@
                 if (snode.length) this.select(snode);
             }
         },
-
-        /**
-         * Get visible or rendered data
-         */
-        visible: function() {
-            return this._visible;
-        },
-
-        /** @private */
-        create: function(spec) {
-            if ( ! spec) 
-                throw new Error("create(): data spec doesn't meet requirement");
-
-            var data = {}, node, prop;
-
-            for (prop in this.options.fields) {
-                data[prop] = spec[prop] || '';
-            }
-            
-            return {
-                node: $.templates.btnode(data),
-                data: data
-            };
-        },
-
-        /**
-         * Remove data from collection
-         */
-        remove: function(data) {
-            data = data || {};
-        },
-
-        /**
-         * Update data using provided spec
-         */
-        update: function(data, spec) {
-            data = data || {};
-            spec = spec || {};
-        },
-
-        append: function(owner, data) {
-            if (this._isvalid(data, 'append', owner)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(owner);
-
-                this._detach(data, desc);
-                this._attach(data, desc, 'append', owner);
-                
-                if (node.length) this.render();
-            } else {
-                this._debug();
-            }
-        },
-
-        before: function(next, data) {
-            if (this._isvalid(data, 'before', next)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(next);
-
-                this._detach(data, desc);
-                this._attach(data, desc, 'before', next);
-
-                if (node.length) this.render();
-            } else {
-                this._debug();
-            }
-        },
-
-        after: function(prev, data) {
-            if (this._isvalid(data, 'after', prev)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(prev);
-
-                this._detach(data, desc);
-                this._attach(data, desc, 'after', prev);
-
-                if (node.length) this.render();
-            } else {
-                this._debug();
-            }
-        },
-
         /** @private */
         _isvalid: function(data, type, dest) {
             var fields = this.options.fields;
 
             if (this.isphantom(dest)) {
-                this._error(type + "(): offset data doesn't exists!");
+                this._error(type + "(): destination doesn't exists!");
                 return false;
             }
 
-            if (this.isparent(data)) {
+            if (this.isphantom(data)) {
                 this._error(type + "(): data doesn't exists!");
                 return false;
             }
@@ -673,128 +511,6 @@
 
             return true;
         },
-
-        _beforeDrag: function(node) {
-            var 
-                fields = this.options.fields,
-                data = this.dataof(node);
-
-            this.deselectAll();
-            this.select(node);
-
-            node.addClass('bt-moving');
-
-            if (data) {
-                var 
-                    isexpand = +data[fields.expand] === 1,
-                    desc = this.descendants(data),
-                    size = desc.length,
-                    attr;
-
-                if (size) {
-                    this.toggle(node, true, 'collapse');
-                    attr = desc.map(function(d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
-                    this.grid.children(attr).remove();
-                }
-
-            }
-        },
-
-        _afterDrag: function(node, offset) {
-            var 
-                options = this.options,
-                indexes = this._indexes,
-                fields = options.fields,
-                stacks = this._data,
-                data = this.dataof(node),
-                prev = node.prev('.bt-node'),
-                next = node.next('.bt-node');
-
-            var lookup = function(current, start, level) {
-                var 
-                    siblings = [],
-                    target = level - 1,
-                    look = stacks[start],
-                    curr;
-
-                target = target < 0 ? 0 : target;
-
-                while(look) {
-                    curr = +look[fields.level];
-                    if (curr === level) siblings.push(look);
-                    if (curr === target) break;
-                    look = stacks[--start];
-                }
-                
-                if (siblings.length) {
-                    return ['after', siblings[siblings.length - 1], current];
-                } else {
-                    return ['append', look, current];    
-                }
-            };
-
-            node.removeClass('bt-moving');
-            
-            // define level
-            var 
-                dataLevel = +data[fields.level],
-                dragLevel = 0,
-                tolerance = 5,
-                args = [];
-
-            offset = offset - options.buffSize;
-
-            if (offset + tolerance < -options.dragSize) {
-                dragLevel = dataLevel - (Math.round(Math.abs(offset) / options.stepSize));
-            } else if (offset > options.dragSize) {
-                dragLevel = dataLevel + (Math.round(offset / options.stepSize));
-            } else {
-                dragLevel = dataLevel;
-            }
-
-            dragLevel = dragLevel < 0 ? 0 : dragLevel;
-
-            if (prev.length) {
-                var 
-                    prevData = this.dataof(prev),
-                    prevLevel = this.level(prevData),
-                    prevIndex = this.index(prevData),
-                    prevChild = prevData._child || [];
-
-                if (dragLevel > prevLevel) {
-                    if (prevChild.length) {
-                        if ( ! this.isexpanded(prevData)) {
-                            args = ['after', prevData, data];
-                        } else {
-                            args = ['before', this.get(prevChild[0]), data];    
-                        }
-                    } else {
-                        args = ['append', prevData, data];
-                    }
-                } else if (dragLevel === prevLevel) {
-                    args = ['after', prevData, data];
-                } else {
-                    args = lookup(data, prevIndex, dragLevel);
-                }
-            } else if (next.length) {
-                var nextData = this.dataof(next);
-                args = ['before', nextData, data];
-            } else {
-                debug('move', 'nothing to move');
-                // this.render();
-            }
-
-            if (args.length) {
-                var action = args.shift();
-                this[action].apply(this, args);
-
-                if ( ! this.isvisible(data)) {
-                    this.scroll(data);
-                }
-
-            }
-        },
-
         /** @private */
         _detach: function(data, descs) {
             var 
@@ -854,7 +570,6 @@
                 this._reindex(offset);
             }
         },
-
         /** @private */
         _attach: function(data, descs, type, dest) {
             var 
@@ -1018,305 +733,6 @@
 
             }
         },
-        
-        get: function(key) {
-            var index = this._indexes[key];
-            return this._data[index] || null;
-        },
-
-        data: function(index) {
-            return index !== undef ? this._data[index] : this._data;
-        },
-
-        index: function(data) {
-            if (data) {
-                var index = this._indexes[data[this.options.fields.id]];
-                return index === undef ? -1 : index;    
-            }
-            return -1;
-        },
-
-        size: function(data) {
-            return this.right(data) - this.left(data) + 1;
-        },
-
-        level: function(data) {
-            return +data[this.options.fields.level];
-        },
-
-        left: function(data) {
-            return +data[this.options.fields.left];
-        },
-
-        right: function(data) {
-            return +data[this.options.fields.right];
-        },
-
-        isphantom: function(data) {
-            return this.index(data) === -1;
-        },
-
-        isleaf: function(data) {
-            return this.right(data) - this.left(data) === 1;
-        },
-
-        isparent: function(data) {
-            return ! this.isleaf(data);
-        },
-
-        isancestor: function(data, target) {
-            return this.left(data) > this.left(target) && this.right(data) < this.right(target);
-        },
-
-        isdescendant: function(data, target) {
-            return this.left(target) > this.left(data) && this.right(target) < this.right(data);
-        },
-
-        isexpanded: function(data) {
-            return +data[this.options.fields.expand] === 1;
-        },
-
-        iscollapsed: function(data) {
-            return ! this.isexpanded(data);
-        },
-
-        isvisible: function(data) {
-            var stacks = this.visible();
-            return indexof(stacks, data) > -1;
-        },
-
-        first: function() {
-            return this._data[0];
-        },
-
-        last: function() {
-            return this._data[this._data.length - 1];
-        },
-
-        parent: function(data) {
-            return data._parent;
-        },
-
-        prev: function(data) {
-            var 
-                fields = this.options.fields,
-                owner = data._parent,
-                found = null,
-                index;
-
-            if (owner) {
-                var child = owner._child || [];
-                index = this._indexes[child[indexof(child, data[fields.id]) - 1]];
-                found = this.data(index);
-            } else {
-                var prev, plvl, dlvl;
-
-                index = this.index(data);
-                dlvl  = this.level(data);
-                prev  = this._data[--index];
-
-                while(prev && (plvl = +prev[fields.level]) >= dlvl) {
-                    if (plvl === dlvl) {
-                        found = prev;
-                        break;
-                    }
-                    prev  = this._data[--index];
-                }
-            }
-
-            return found || null;
-        },
-
-        next: function(data) {
-            var 
-                fields = this.options.fields, 
-                owner = data._parent, 
-                found = null,
-                index;
-
-            if (owner) {
-                var child = owner._child || [];
-                index = this._indexes[child[indexof(child, data[fields.id]) + 1]];
-                found = this.data(index);
-            } else {
-                var next, dlvl, nlvl;
-
-                index = this.index(data);
-                dlvl  = this.level(data);
-                next  = this._data[++index];
-
-                while(next && (nlvl = +next[fields.level]) >= dlvl) {
-                    if (nlvl === dlvl) {
-                        found = next;
-                        break;
-                    }
-                    next  = this._data[++index];
-                }
-            }
-            return found;
-        },
-
-        descendants: function(data) {
-            var 
-                fields = this.options.fields,
-                start = this._indexes[data[fields.id]],
-                next = this._data[++start],
-                desc = [],
-                rgt = +data[fields.right];
-
-            while(next) {
-                if (+next[fields.right] >= rgt) 
-                    break;
-                desc.push(next);
-                next = this._data[++start];
-            }
-            return desc;
-        },
-
-        children: function(data) {
-            var 
-                child = data._child || [],
-                len = child.length,
-                arr = [];
-
-            for (var i = 0; i < len; i++) {
-                var idx = this._indexes[child[i]],
-                    row = this._data[idx];
-                if (row) {
-                    arr.push(row);
-                }
-            }
-
-            return arr;
-        },
-
-        createNode: function(data) {
-            return $($.templates.btnode(data));
-        },
-
-        nodeof: function(data) {
-            return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
-        },
-
-        movedNode: function() {
-            return this.grid.children('.ui-sortable-helper');
-        },
-
-        visibleNodes: function() {
-            return this.grid.children('.bt-node:not(.ui-sortable-placeholder)');
-        },
-
-        removableNodes: function() {
-            return this.grid.children('.bt-node:not(.ui-sortable-helper,.ui-sortable-placeholder)');
-        },
-
-        selectedNode: function() {
-            var node = $({});
-            if (this._selected) {
-                node = this.grid.children('.bt-node[data-id=' + this._selected + ']');
-            }
-            return node.length ? node : null;
-        },
-
-        dataof: function(node) {
-            var key = node.attr('data-id');
-            return this._data[this._indexes[key]];
-        },
-
-        cascade: function() {
-
-        },
-
-        expand: function(data) {
-            var 
-                fields = this.options.fields,
-                fshow = function(data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = false;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fshow.call(this, ds[i]);
-                        }
-                    }    
-                };
-
-            data[fields.expand] = '1';
-            fshow.call(this, data);
-
-            this._fireEvent('expand', data);
-            this.render();
-        },
-
-        collapse: function(data) {
-            var 
-                fields = this.options.fields,
-                fhide = function(data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = true;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fhide.call(this, ds[i]);
-                        }
-                    }     
-                };
-
-            data[fields.expand] = '0'; 
-            fhide.call(this, data);
-
-            this._fireEvent('collapse', data);
-            this.render();
-        },
-
-        expandAll: function() {
-
-        },
-
-        collapseAll: function() {
-
-        },
-
-        toggle: function(node, silent, force) {
-            var expander = node.find('.elbow-expander');
-            silent = silent === undef ? true : silent;
-            if (expander.length) {
-                if (silent) {
-                    // just update style
-                    var state = expander.hasClass('elbow-plus') ? 'elbow-minus' : 'elbow-plus';
-                    if (force !== undef) {
-                        state = force == 'expand' ? 'elbow-minus' : 'elbow-plus';
-                    }
-                    expander.removeClass('elbow-plus elbow-minus').addClass(state); 
-                } else {
-                    // perform expand/collapse
-                }
-            }
-        },
-
-        /** @private */
-        select: function(node) {
-            this._selected = node.attr('data-id');
-            node.addClass('bt-selected');
-        },
-
-        /** @private */
-        deselect: function(node) {
-            this._selected = null;
-            node.removeClass('bt-selected');
-        },
-
-        /** @private */
-        deselectAll: function() {
-            this._selected = null;
-            this.grid.children('.bt-selected').removeClass('bt-selected');
-        },
-
-        selection: function() {
-            var node = this.grid.children('.bt-selected');
-            return node.length ? this._data[this._indexes[this._selected]] : null;
-        },
-
         /** @private */
         _startEdit: function(node) {
             var 
@@ -1347,7 +763,6 @@
 
             defer.call(this);
         },
-
         /** @private */
         _stopEdit: function(deselect) {
             var 
@@ -1384,9 +799,421 @@
                 this._selected = null;
                 this.grid.find('.bt-selected').removeClass('bt-selected');
             }
-
         },
+        /** @private */
+        _fireEvent: function() {
+            var args = $.makeArray(arguments),
+                name = (args.shift()) + '.bt';
+            this.element.trigger(name, args);
+        },
+        hasScroll: function() {
+            return this.element[0].scrollHeight > this.element.height();
+        },
+        load: function(data, render) {
+            var 
+                fields = this.options.fields,
+                start = this._data.length,
+                stop;
 
+            this._data.push.apply(this._data, (data || []));
+            stop = this._data.length;
+
+            this._reindex(start, stop);
+            this._rebuild(start, stop);
+
+            render = render === undef ? false : render;
+            render && this.render();
+        },
+        render: function() {
+            var 
+                buff = this.options.buffer * this.options.itemSize,
+                spix = this.grid.scrollTop() - this.grid.position().top - buff,
+                epix = spix + this.element.height() + buff * 2,
+                data = $.grep(this._data, function(d){ return !d._hidden; });
+            
+            spix = spix < 0 ? 0 : spix;
+
+            var 
+                begidx = Math.floor(spix / this.options.itemSize),
+                endidx = Math.ceil(epix / this.options.itemSize),
+                padtop = this.options.itemSize * begidx,
+                padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
+
+            this.grid.css({
+                paddingTop: padtop,
+                paddingBottom: padbtm
+            });
+
+            // this.tickStart('render');
+            this._renderRange(data, begidx, endidx);
+            // this.tickStop('render');
+        },
+        scroll: function(data) {
+            var 
+                options = this.options,
+                stacks  = $.grep(this._data, function(d){ return ! d._hidden; }),
+                scroll  = indexof(stacks, data) * options.itemSize,
+                element = this.element;
+
+            element.animate({scrollTop: scroll}, scroll);
+        },
+        visible: function() {
+            return this._visible;
+        },
+        create: function(spec) {
+
+            if ( ! spec) {
+                this._error("create(): spec doesn't meet requirement!");
+                return false;
+            }
+
+            // fill with default specs
+            var fields = this.options.fields,
+                uuid = this._guid(),
+                prop,
+                key;
+
+            for (prop in fields) {
+                key = fields[prop];
+                if (spec[key] === undef) {
+                    switch(prop) {
+                        case 'id':
+                        case 'path':
+                            spec[key] = uuid;
+                            break;
+                        case 'level':
+                            spec[key] = 0;
+                            break;
+                        case 'leaf':
+                        case 'expand':
+                            spec[key] = 1;
+                            break;
+                        default:
+                            spec[key] = '';
+                    }
+                }
+            }
+
+            // find first data
+            var first = this.first();
+
+            if (first) {
+                spec[fields.left]  = first[fields.left];
+                spec[fields.right] = first[fields.right];
+                this._data.unshift(spec);
+            } else {
+                spec[fields.left]  = 1;
+                spec[fields.right] = 2;
+                this._data.push(spec);
+            }
+            this._reindex();
+            this.render();
+        },
+        remove: function(data) {
+            data = data || {};
+        },
+        update: function(data, spec) {
+            data = data || {};
+            spec = spec || {};
+        },
+        append: function(owner, data) {
+            if (this._isvalid(data, 'append', owner)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(owner);
+
+                this._detach(data, desc);
+                this._attach(data, desc, 'append', owner);
+                
+                if (node.length) this.render();
+            } else {
+                this._debug();
+            }
+        },
+        before: function(next, data) {
+            if (this._isvalid(data, 'before', next)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(next);
+
+                this._detach(data, desc);
+                this._attach(data, desc, 'before', next);
+
+                if (node.length) this.render();
+            } else {
+                this._debug();
+            }
+        },
+        after: function(prev, data) {
+            if (this._isvalid(data, 'after', prev)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(prev);
+
+                this._detach(data, desc);
+                this._attach(data, desc, 'after', prev);
+
+                if (node.length) this.render();
+            } else {
+                this._debug();
+            }
+        },
+        get: function(key) {
+            var index = this._indexes[key];
+            return this._data[index] || null;
+        },
+        data: function(index) {
+            return index !== undef ? this._data[index] : this._data;
+        },
+        index: function(data) {
+            if (data) {
+                var key = data[this.options.fields.id],
+                    idx = this._indexes[key];
+                return idx === undef ? -1 : idx;
+            }
+            return -1;
+        },
+        size: function(data) {
+            return this.right(data) - this.left(data) + 1;
+        },
+        level: function(data) {
+            return +data[this.options.fields.level];
+        },
+        left: function(data) {
+            return +data[this.options.fields.left];
+        },
+        right: function(data) {
+            return +data[this.options.fields.right];
+        },
+        isphantom: function(data) {
+            return this.index(data) === -1;
+        },
+        isleaf: function(data) {
+            return this.right(data) - this.left(data) === 1;
+        },
+        isparent: function(data) {
+            return ! this.isleaf(data);
+        },
+        isancestor: function(data, target) {
+            return this.left(data) > this.left(target) && this.right(data) < this.right(target);
+        },
+        isdescendant: function(data, target) {
+            return this.left(target) > this.left(data) && this.right(target) < this.right(data);
+        },
+        isexpanded: function(data) {
+            return +data[this.options.fields.expand] === 1;
+        },
+        iscollapsed: function(data) {
+            return ! this.isexpanded(data);
+        },
+        isvisible: function(data) {
+            var stacks = this.visible();
+            return indexof(stacks, data) > -1;
+        },
+        first: function() {
+            return this._data[0];
+        },
+        last: function() {
+            return this._data[this._data.length - 1];
+        },
+        parent: function(data) {
+            return data._parent;
+        },
+        prev: function(data) {
+            var 
+                fields = this.options.fields,
+                owner = data._parent,
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) - 1]];
+                found = this.data(index);
+            } else {
+                var prev, plvl, dlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                prev  = this._data[--index];
+
+                while(prev && (plvl = +prev[fields.level]) >= dlvl) {
+                    if (plvl === dlvl) {
+                        found = prev;
+                        break;
+                    }
+                    prev  = this._data[--index];
+                }
+            }
+
+            return found || null;
+        },
+        next: function(data) {
+            var 
+                fields = this.options.fields, 
+                owner = data._parent, 
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) + 1]];
+                found = this.data(index);
+            } else {
+                var next, dlvl, nlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                next  = this._data[++index];
+
+                while(next && (nlvl = +next[fields.level]) >= dlvl) {
+                    if (nlvl === dlvl) {
+                        found = next;
+                        break;
+                    }
+                    next  = this._data[++index];
+                }
+            }
+            return found;
+        },
+        descendants: function(data) {
+            var 
+                fields = this.options.fields,
+                start = this._indexes[data[fields.id]],
+                next = this._data[++start],
+                desc = [],
+                rgt = +data[fields.right];
+
+            while(next) {
+                if (+next[fields.right] >= rgt) 
+                    break;
+                desc.push(next);
+                next = this._data[++start];
+            }
+            return desc;
+        },
+        children: function(data) {
+            var 
+                child = data._child || [],
+                len = child.length,
+                arr = [];
+
+            for (var i = 0; i < len; i++) {
+                var idx = this._indexes[child[i]],
+                    row = this._data[idx];
+                if (row) {
+                    arr.push(row);
+                }
+            }
+
+            return arr;
+        },
+        createNode: function(data) {
+            return $($.templates.btnode(data));
+        },
+        nodeof: function(data) {
+            return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
+        },
+        movedNode: function() {
+            return this.grid.children('.ui-sortable-helper');
+        },
+        visibleNodes: function() {
+            return this.grid.children('.bt-node:not(.ui-sortable-placeholder)');
+        },
+        removableNodes: function() {
+            return this.grid.children('.bt-node:not(.ui-sortable-helper,.ui-sortable-placeholder)');
+        },
+        selectedNode: function() {
+            var node = $({});
+            if (this._selected) {
+                node = this.grid.children('.bt-node[data-id=' + this._selected + ']');
+            }
+            return node.length ? node : null;
+        },
+        dataof: function(node) {
+            var key = node.attr('data-id');
+            return this._data[this._indexes[key]];
+        },
+        cascade: function(data, handler, scope) {
+            var desc = this.descendants(data) || [];
+            desc.unshift(data);
+            scope = scope || this;
+            $.each(desc, function(i, d){
+                $.proxy(handler, scope, d)();
+            });
+        },
+        expand: function(data) {
+            var 
+                fields = this.options.fields,
+                fshow = function(data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = false;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fshow.call(this, ds[i]);
+                        }
+                    }    
+                };
+
+            data[fields.expand] = '1';
+            fshow.call(this, data);
+
+            this._fireEvent('expand', data);
+            this.render();
+        },
+        collapse: function(data) {
+            var 
+                fields = this.options.fields,
+                fhide = function(data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = true;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fhide.call(this, ds[i]);
+                        }
+                    }     
+                };
+
+            data[fields.expand] = '0'; 
+            fhide.call(this, data);
+
+            this._fireEvent('collapse', data);
+            this.render();
+        },
+        toggle: function(node, silent, force) {
+            var expander = node.find('.elbow-expander');
+            silent = silent === undef ? true : silent;
+            if (expander.length) {
+                if (silent) {
+                    // just update style
+                    var state = expander.hasClass('elbow-plus') ? 'elbow-minus' : 'elbow-plus';
+                    if (force !== undef) {
+                        state = force == 'expand' ? 'elbow-minus' : 'elbow-plus';
+                    }
+                    expander.removeClass('elbow-plus elbow-minus').addClass(state); 
+                } else {
+                    // perform expand/collapse
+                }
+            }
+        },
+        select: function(node) {
+            this._selected = node.attr('data-id');
+            node.addClass('bt-selected');
+        },
+        deselect: function(node) {
+            this._selected = null;
+            node.removeClass('bt-selected');
+        },
+        deselectAll: function() {
+            this._selected = null;
+            this.grid.children('.bt-selected').removeClass('bt-selected');
+        },
+        selection: function() {
+            var node = this.grid.children('.bt-selected');
+            return node.length ? this._data[this._indexes[this._selected]] : null;
+        },
         query: function(query) {
 
             var 
@@ -1453,13 +1280,6 @@
             regex = null;
             this.render();
         },
-
-
-
-        /**
-         * Swap item
-         * @private
-         */
         swap: function(from, to, reindex) {
             var size = this._data.length, tmp, i;
             if (from != to && from >= 0 && from <= size && to >= 0 && to <= size) {
@@ -1480,11 +1300,56 @@
                 if (reindex) this._reindex();
             }
         },
-        
-        /** @private */
-        _navigate: function(e) {
+        plugin: function() {
+            return this;
+        },
+        tickStart: function(name) {
+            this.markers = this.markers || {};
+            name = name === undef ? '_' : name;
+            this.markers[name] = new Date();
+        },
+        tickStop: function(name) {
+            this.markers = this.markers || {};
+            name = name === undef ? '_' : name;
+            if (this.markers[name] !== undef) {
+                var elapsed = ((new Date() - this.markers[name]) / 1000) + 'ms';
+                console.log(name + ': ' + elapsed);
+            }
+        },
+        _onScroll: function(e) {
+            var 
+                options = this.options,
+                currtop = this.element.scrollTop(),
+                currdir = currtop > this._scrollTop ? 'down' : 'up';
+
+            this._scrollDif = this._scrollDir != currdir 
+                ? 0 
+                : (this._scrollTop + Math.abs(currtop - this._scrollTop));
+
+            if (this._scrollDif === 0 || this._scrollDif >= (options.buffer * options.itemSize)) {
+                this.render();
+                this._scrollDif = 0;
+            }
+
+            this._scrollTop = currtop;
+            this._scrollDir = currdir;
+        },
+        _onExpanderClick: function(e) {
+            e.stopPropagation();
+            var 
+                node = $(e.currentTarget).closest('.bt-node'),
+                data = this.get(node.attr('data-id'));
+
+            if (data) {
+                if (this.isexpanded(data)) {
+                    this.collapse(data);
+                } else {
+                    this.expand(data);
+                }
+            }
+        },
+        _onNavigate: function(e) {
             var code = e.keyCode || e.which;
-            
             if (code == 9 || code == 38 || code == 40) {
                 var 
                     node = this.grid.find('.bt-selected'),
@@ -1515,60 +1380,139 @@
 
                     }    
                 }
-
             }
-            
         },
-
-        maps: function() {
+        _onBeforeDrag: function(e, ui) {
             var 
-                args = $.makeArray(arguments),
-                size = args.length,
-                maps = this._data.map(function(d){
-                    var t = [], i = 0;
-                    for (; i < size; i++) t.push(d[args[i]]);
-                    return t;
-                });
-            console.log(maps);
-        },
+                fields = this.options.fields,
+                node = ui.item,
+                data = this.dataof(node);
 
-        plugin: function() {
-            return this;
-        },
+            this.deselectAll();
+            this.select(node);
 
-        tickStart: function(name) {
-            this.markers = this.markers || {};
-            name = name === undef ? '_' : name;
-            this.markers[name] = new Date();
-        },
+            node.addClass('bt-moving');
 
-        tickStop: function(name) {
-            this.markers = this.markers || {};
-            name = name === undef ? '_' : name;
-            if (this.markers[name] !== undef) {
-                var elapsed = ((new Date() - this.markers[name]) / 1000) + 'ms';
-                console.log(name + ': ' + elapsed);
+            if (data) {
+                var 
+                    isexpand = +data[fields.expand] === 1,
+                    desc = this.descendants(data),
+                    size = desc.length,
+                    attr;
+
+                if (size) {
+                    this.toggle(node, true, 'collapse');
+                    attr = desc.map(function(d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
+                    this.grid.children(attr).remove();
+                }
+
             }
         },
+        _onAfterDrag: function(e, ui) {
+            var 
+                options = this.options,
+                indexes = this._indexes,
+                fields = options.fields,
+                stacks = this._data,
+                node = ui.item,
+                offset = ui.position.left,
+                data = this.dataof(node),
+                prev = node.prev('.bt-node'),
+                next = node.next('.bt-node');
 
-        /** @private */
-        _fireEvent: function() {
-            var args = $.makeArray(arguments),
-                name = (args.shift()) + '.bt';
-            this.element.trigger(name, args);
+            var lookup = function(current, start, level) {
+                var 
+                    siblings = [],
+                    target = level - 1,
+                    look = stacks[start],
+                    curr;
+
+                target = target < 0 ? 0 : target;
+
+                while(look) {
+                    curr = +look[fields.level];
+                    if (curr === level) siblings.push(look);
+                    if (curr === target) break;
+                    look = stacks[--start];
+                }
+                
+                if (siblings.length) {
+                    return ['after', siblings[siblings.length - 1], current];
+                } else {
+                    return ['append', look, current];    
+                }
+            };
+
+            node.removeClass('bt-moving');
+            
+            // define level
+            var 
+                dataLevel = +data[fields.level],
+                dragLevel = 0,
+                tolerance = 5,
+                args = [];
+
+            offset = offset - options.buffSize;
+
+            if (offset + tolerance < -options.dragSize) {
+                dragLevel = dataLevel - (Math.round(Math.abs(offset) / options.stepSize));
+            } else if (offset > options.dragSize) {
+                dragLevel = dataLevel + (Math.round(offset / options.stepSize));
+            } else {
+                dragLevel = dataLevel;
+            }
+
+            dragLevel = dragLevel < 0 ? 0 : dragLevel;
+
+            if (prev.length) {
+                var 
+                    prevData = this.dataof(prev),
+                    prevLevel = this.level(prevData),
+                    prevIndex = this.index(prevData),
+                    prevChild = prevData._child || [];
+
+                if (dragLevel > prevLevel) {
+                    if (prevChild.length) {
+                        if ( ! this.isexpanded(prevData)) {
+                            args = ['after', prevData, data];
+                        } else {
+                            args = ['before', this.get(prevChild[0]), data];    
+                        }
+                    } else {
+                        args = ['append', prevData, data];
+                    }
+                } else if (dragLevel === prevLevel) {
+                    args = ['after', prevData, data];
+                } else {
+                    args = lookup(data, prevIndex, dragLevel);
+                }
+            } else if (next.length) {
+                var nextData = this.dataof(next);
+                args = ['before', nextData, data];
+            } else {
+                debug('move', 'nothing to move');
+                // this.render();
+            }
+
+            if (args.length) {
+                var action = args.shift();
+                this[action].apply(this, args);
+
+                if ( ! this.isvisible(data)) {
+                    this.scroll(data);
+                }
+
+            }
         },
-
         _error: function(message) {
             this._message = message;
         },
-
         _debug: function(message) {
             if (this.options.debug) {
                 message = message === undef ? this._message : message;
                 console.log(message);    
             }
         },
-
         destroy: function(remove) {
             this.edtext.off('.bt');
             this.element.off('.bt');
@@ -1585,7 +1529,6 @@
                 this.element.remove();
             }
         }
-
     };
 
     $.fn.bigtree = function(options) {

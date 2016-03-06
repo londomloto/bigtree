@@ -1,0 +1,204 @@
+
+.bigtree {
+	/*width: 100%;
+	height: 100%;*/ 
+	overflow: auto;
+	overflow-x: hidden;
+	overflow-y: scroll;
+}
+
+.bigtree .bt-hbox {
+	display: -webkit-flex;
+	display: -ms-flexbox;
+	display: flex;
+
+	-webkit-flex-direction: row;
+	-ms-flex-direction: row;
+	flex-direction: row;
+
+	-webkit-align-content: flex-start;
+	-ms-flex-line-pack: start;
+	align-content: flex-start;
+}
+
+.bigtree .bt-flex {
+	-webkit-flex: 1;
+	-ms-flex: 1;
+    flex: 1; 
+}
+
+.bt-grid {
+	margin: 20px;
+}
+
+.bt-node {
+	height: 32px;
+	margin: 0;
+	padding: 1px 0;
+	display: block;
+}
+
+.bt-node.bt-selected .bt-node-body {
+	outline: solid 1px #FCC127;
+	border-color: #FCC127;
+}
+
+.bt-node-elbow, 
+.bt-node-body {
+	height: 30px;
+}
+
+.bt-node-elbow {
+	position: relative;
+	width: 25px;
+}
+
+.bt-node-elbow.elbow-line:before,
+.bt-node-elbow.elbow-end:before,
+.bt-node-elbow.elbow-end:after {
+	content: '';
+	display: block;
+	position: absolute;
+}
+
+.bt-node-elbow.elbow-line:before {
+	border-left: solid 1px #ccc;
+	left: 10px;
+	top: -1px;
+	bottom: -1px;
+}
+
+.bt-node-elbow.elbow-end:before {
+	border-left: solid 1px #ccc;
+	left: 10px;
+	top: -1px;
+	bottom: -1px;
+}
+
+.bt-node-elbow.elbow-end:after {
+	border-top: solid 1px #ccc;
+	left: 10px;
+	top: 14px;
+	right: 0;
+}
+
+.bt-node.bt-last .bt-node-elbow.elbow-end:before {
+	bottom: 15px;
+}
+
+.bt-node-elbow .elbow-expander {
+	position: absolute;
+	z-index: 2;
+	top: 7px;
+	left: 4px;
+	width: 14px;
+	height: 14px;
+	display: block;
+	border-radius: 50%;
+	background-color: #fff;
+	cursor: pointer;
+}
+
+.bt-node-elbow .elbow-expander.elbow-plus {
+	background-image: url(node-plus.png);
+	background-repeat: no-repeat;
+}
+
+.bt-node-elbow .elbow-expander.elbow-minus {
+	background-image: url(node-minus.png);
+	background-repeat: no-repeat;
+}
+
+.bt-node-body {
+	border: solid 1px #ccc;
+	background: #ffffff;
+	overflow: hidden;
+	padding: 0;
+}
+
+.bt-node.bt-moving .bt-node-elbow:not(.elbow-end):before {
+	border-left: none;
+}
+
+.bt-node.bt-moving .bt-node-elbow.elbow-end:before {
+	border-left: none;
+}
+
+.bt-node.bt-moving .bt-node-elbow.elbow-end:after {
+	border-top: none;
+}
+
+.bt-drag,
+.bt-text,
+.bt-editor input,
+.bt-trash,
+.bt-plugin {
+	height: 28px;
+}
+
+.bt-drag {
+	width: 16px;
+	background: #ffffff url(grip.png) no-repeat 50% 50%;
+	border: solid 1px #ccc;
+	border-width: 0 1px 0 0;
+	cursor: pointer;
+}
+
+.bt-hightlight {
+	background-color: #FF9;
+	font-weight: 400;
+}
+
+.bt-text,
+.bt-editor input {
+	font-family: Roboto;
+	font-weight: 300;
+	font-size: 12px;
+	color: #222;
+}
+
+.bt-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	line-height: 28px;
+	padding: 0 5px;
+	position: relative;
+	/*cursor: text;*/
+}
+
+.bt-editor {
+	position: absolute;
+	left: 5px;
+	right: 5px;
+	top: 0;
+	bottom: 0;
+	padding: 0;
+}
+
+.bt-editor input {
+	border: none;
+	width: 100%;
+	outline: none;
+	padding: 0;
+}
+
+/** dragdrop */
+.bt-node-sortable.ui-sortable-placeholder {
+	background: #ffffff url(hand.png) no-repeat 5px 50%;
+	height: 32px;
+	margin-left: -15px;
+	opacity: .5;
+}
+
+/** trash */
+.bt-trash {
+	width: 20px;
+	/*background: url(../bigtree/node-trash.png) no-repeat 50% 50%;*/
+}
+
+/** plugin container */
+.bt-plugin {
+	width: 284px;
+	/*background: #00BCD4;*/
+}

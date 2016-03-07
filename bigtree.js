@@ -145,7 +145,7 @@
         buffSize: 20,
 
         // scroll delay
-        delay: 10,
+        delay: 32,
 
         // leading & trailing rendered nodes
         buffer: 10,
@@ -165,6 +165,8 @@
                         '<div class="bt-trash"></div>'+
                     '</div>'+
                 '</div>',
+
+        plugins: [],
 
         debug: true
     };
@@ -219,15 +221,13 @@
 
             this.editor = $('<div class="bt-editor"><input type="text"></div>');
             this.edtext = this.editor.children('input');
-
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);
 
-            // init template
-            $.templates({
-                btnode: {
-                    markup: options.markup
-                }
-            });
+            // init user plugins
+            this._initPlugins();
+
+            // setup template
+            $.templates('btnode', options.markup);
 
             // init sortable
             this.element.sortable({
@@ -235,6 +235,8 @@
                 handle: '.bt-drag',
                 placeholder: 'bt-node-sortable ui-sortable-placeholder'
             });
+
+            
         },
         /** @private */
         _initEvents: function() {
@@ -244,63 +246,59 @@
             this._scrollDir = '';
             this._scrollDif = 0;
 
-            // scroll
-            this.element
-                .off('scroll.bt')
-                .on('scroll.bt', $.debounce(options.delay, $.proxy(this._onScroll, this)));
+            // unbinds
+            this.element.off('scroll.bt click.bt.expander keydown.bt sortstart.bt sortstop.bt click.bt.select click.bt.startedit');
+            this.edtext.off('click.bt keypress.bt');
 
-            // expander click
-            this.element
-                .off('click.bt.expander')
-                .on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
+            this.element.on({
+                'scroll.bt': $.debounce(options.delay, $.proxy(this._onScroll, this)),
+                'keydown.bt': $.proxy(this._onNavigate, this),
+                'sortstart.bt': $.proxy(this._onBeforeDrag, this),
+                'sortstop.bt': $.proxy(this._onAfterDrag, this),
+                'click.bt.select': $.proxy(function(){ this.deselectAll(); }, this)
+            });
 
-            // navigation
-            this.element
-                .off('keydown.bt')
-                .on('keydown.bt', $.proxy(this._onNavigate, this));
+            this.element.on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
 
-            // handle dragdrop event
-            this.element
-                .off('sortstart.bt')
-                .on('sortstart.bt', $.proxy(this._onBeforeDrag, this));
+            this.element.on('click.bt.startedit', '.bt-text', $.proxy(function(e){
+                e.stopPropagation();
+                var node = $(e.currentTarget).closest('.bt-node');
+                this._startEdit(node);
+            }, this));
 
-            this.element
-                .off('sortstop.bt')
-                .on('sortstop.bt', $.proxy(this._onAfterDrag, this));
-            
-            // selection
-            this.element
-                .off('click.bt.select')
-                .on('click.bt.select', $.proxy(function(){
-                    this.deselectAll();
-                }, this));
-
-            // text edit
-            this.element
-                .off('click.bt.startedit')
-                .on('click.bt.startedit', '.bt-text', $.proxy(function(e){
-                    e.stopPropagation();
-                    var node = $(e.currentTarget).closest('.bt-node');
-                    this._startEdit(node);
-                }, this));
-
-            // editor event
-            this.edtext
-                .off('click.bt')
-                .on('click.bt', function(e){
+            this.edtext.on({
+                'click.bt': function(e){
                     e.preventDefault();
                     e.stopPropagation();
-                });
-
-            this.edtext
-                .off('keypress.bt')
-                .on('keypress.bt', $.proxy(function(e){
-                    if (e.keyCode == 13) {
+                },
+                'keypress.bt': $.proxy(function(e){
+                    if (e.keyCode === 13) {
                         e.preventDefault();
                         this._stopEdit(false);
                     }
-                }, this));
+                })
+            });
         },
+
+        _initPlugins: function() {
+            var 
+                plugins = this.options.plugins,
+                markup = $(this.options.markup),
+                common = markup.find('.bt-plugin.common'),
+                custom = markup.find('.bt-plugin.custom'),
+                helper = $('<div>');
+
+            $.each(plugins, $.proxy(function(i, p){
+                if (p.template) {
+                    p.pluginid = i;
+                    $(p.template).attr('data-plugin-id', p.pluginid).appendTo(p.custom ? custom : common);
+                }    
+            }, this));
+
+            markup = helper.append(markup).remove().html();
+            this.options.markup = markup;
+        },
+
         /** @private */
         _reindex: function(start, stop) {
             var fields = this.options.fields, i;
@@ -366,20 +364,21 @@
 
                     par._child.push(cur[fields.id]);
                 }
+
+                cur._metachanged = true;
                 
             }
         },
         /** @private */
         _renderRange: function(data, start, end) {
+
             var 
-                range  = data.slice(start, end),
+                plugins = this.options.plugins,
+                range = data.slice(start, end),
                 fields = this.options.fields,
-                moved  = this.movedNode();
+                moved = this.movedNode();
 
-            this._fireEvent('beforenodesrender');
-
-            this.editor.detach();
-            this.removableNodes().remove();
+            this._fireEvent('beforerender');
 
             if (moved.length) {
                 range = $.grep(range, function(d){
@@ -389,42 +388,49 @@
 
             this._visible = range;
 
-            for (var i = 0, size = range.length; i < size; i++) {
-                var 
-                    data = range[i], 
-                    owner = data._parent,
-                    level = +data[fields.level],
-                    isparent = +data[fields.leaf] === 0,
-                    isexpand = +data[fields.expand] === 1,
-                    lines = [],
-                    elbows = [];
+            // prepare rendering node
+            $.each(range, $.proxy(function(i, data){
+                if (data._metachanged) {
+                    data._metachanged = false;
 
-                var type, icon, cls, j;
-                    
-                while(owner) {
-                    lines[owner[fields.level]] = owner._last ? 0 : 1;
-                    owner = owner._parent;
-                }
+                    var 
+                        owner = data._parent,
+                        level = +data[fields.level],
+                        isparent = +data[fields.leaf] === 0,
+                        isexpand = +data[fields.expand] === 1,
+                        lines = [],
+                        elbows = [];
 
-                for (j = 0; j <= level; j++) {
-                    if (j === level) {
-                        type = 'elbow-end';
-                        icon = isparent 
-                            ? '<span class="elbow-expander ' + (isexpand ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
-                            : '';
-                    } else {
-                        type = lines[j] === 1 ? 'elbow-line' : '';
-                        icon = '';
+                    var type, icon, cls, j;
+                        
+                    while(owner) {
+                        lines[owner[fields.level]] = owner._last ? 0 : 1;
+                        owner = owner._parent;
                     }
-                    elbows.push({
-                        type: type,
-                        icon: icon
-                    });
+
+                    for (j = 0; j <= level; j++) {
+                        if (j === level) {
+                            type = 'elbow-end';
+                            icon = isparent 
+                                ? '<span class="elbow-expander ' + (isexpand ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
+                                : '';
+                        } else {
+                            type = lines[j] === 1 ? 'elbow-line' : '';
+                            icon = '';
+                        }
+                        elbows.push({
+                            type: type,
+                            icon: icon
+                        });
+                    }
+
+                    data._elbows = elbows;
                 }
+            }, this));
+            
+            this.editor.detach();
 
-                data._elbows = elbows;
-            }
-
+            this.removableNodes().remove();
             this.grid.append($.templates.btnode(range));
             this.element.focus();
 
@@ -438,7 +444,44 @@
                 visdata = this.visible(),
                 visnode = this.visibleNodes();
 
-            this._fireEvent('nodesrender', visnode, visdata);
+            // register plugins
+            visnode.each(function(i, n){
+                var node = $(n), cloned, status, elem;
+                if (visdata[i]._plugins === undef) {
+                    visdata[i]._plugins = [];
+                    $.each(plugins, function(k, plugin){
+                        elem = node.find('[data-plugin-id='+k+']');
+                        if (elem.length) {
+                            cloned = plugin.clone();
+                            cloned.element = elem;
+
+                            status = cloned.onCreate(visdata[i]);
+                            
+                            if (status.than) {
+                                status.than(function(p){
+                                    p.created = true;
+                                });
+                            } else {
+                                cloned.created = true;
+                            }
+
+                            visdata[i]._plugins.push(cloned);
+                        }
+                    });
+                } else {
+                    $.each(visdata[i]._plugins, function(k, p){
+                        elem = node.find('[data-plugin-id='+k+']');
+                        
+                        p.element.remove();
+                        p.element = null;
+
+                        if (elem.length) p.element = elem;
+                        if (p.created) p.onRender();
+                    });
+                }
+            });
+
+            this._fireEvent('render', visnode, visdata);
         },
         /** @private */
         _decorate: function() { 
@@ -515,9 +558,7 @@
                 size = descs.length;
 
             if (offset > -1) {
-
                 data._origin = null;
-
                 var 
                     owner = data._parent || null, 
                     regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
@@ -712,7 +753,6 @@
                         d[fields.left]  = x;
                         d[fields.right] = y;
 
-                        
                     }
 
                     if (i >= bindex) {
@@ -723,10 +763,8 @@
                     }
 
                 }
-                
                 // rebuild...
                 this._rebuild(bindex);
-
             }
         },
         _insert: function(data, type, dest) {
@@ -752,9 +790,8 @@
                     }
 
                     dest._child.push(data);
-
                     pos = +dest[fields.right];
-
+                    
                     break;
                 case 'before':
 
@@ -798,6 +835,8 @@
 
             data[fields.left]  = pos;
             data[fields.right] = pos + 1;
+
+            data._metachanged = true;
 
             this._data.splice(index, 0, data);
 
@@ -972,7 +1011,6 @@
             if (owner) {
                 result = this.append(owner, spec);
             } else if (first) {
-                this._selected = guid;
                 result = this.before(first, spec);
             } else {
                 spec[fields.left]  = 1;
@@ -994,8 +1032,55 @@
             this._debug();
             return result;
         },
-        remove: function(data) {
-            data = data || {};
+        remove: function(data, cascade) {
+            if (data) {
+                var
+                    fields = this.options.fields,
+                    offset = this.index(data),
+                    node = this.nodeof(data);
+
+                cascade = cascade === undef ? true : cascade;
+
+                if (cascade) {
+                    var 
+                        removed = this.descendants(data), 
+                        owner = data._parent,
+                        prev = this.prev(data),
+                        size,
+                        key;
+
+                    removed.unshift(data);
+                    size = removed.length;
+
+                    for (var i = 0; i < size; i++) 
+                        delete this._indexes[removed[i][fields.id]];
+
+                    this._data.splice(offset, size);
+                    this._reindex(offset);
+
+                    if (owner) {
+                        owner._child = owner._child || [];
+                        var chpos = indexof(owner._child, data[fields.id]);
+                        if (chpos > -1) {
+                            owner._child.splice(chpos, 1);
+                            if ( ! owner._child.length) {
+                                owner[fields.leaf] = '1';
+                            }
+                        }
+                        this._rebuild(this.index(owner));
+                    } else {
+                        if (prev) {
+                            this._rebuild(this.index(prev));
+                        } else {
+                            this._rebuild(offset);    
+                        }
+                    }
+
+                    if (node.length) this.render();
+                }
+                return true;
+            }
+            return false;
         },
         update: function(data, spec) {
             data = data || {};
@@ -1245,6 +1330,8 @@
                 };
 
             data[fields.expand] = '1';
+            data._metachanged = true;
+
             fshow.call(this, data);
 
             this._fireEvent('expand', data);
@@ -1265,6 +1352,8 @@
                 };
 
             data[fields.expand] = '0'; 
+            data._metachanged = true;
+
             fhide.call(this, data);
 
             this._fireEvent('collapse', data);
@@ -1286,7 +1375,10 @@
                 }
             }
         },
-        select: function(node) {
+        select: function(node, single) {
+            single = single === undef ? true : single;
+            if (single) this.deselectAll();
+
             this._selected = node.attr('data-id');
             node.addClass('bt-selected');
         },

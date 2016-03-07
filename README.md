@@ -121,6 +121,16 @@ var myplugin = (function(){
     return new Plugin();
 }());
 ```
+Example usage:
+```javascript
+$('#tree').bigtree({
+    markup: '<div></div>',
+    plugins: [
+        myplugin
+    ]
+});
+```
+
 ## Documentation
 On progress...
 

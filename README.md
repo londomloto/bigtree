@@ -91,6 +91,36 @@ On progress...
     });
     ```
 
+## Writing Your Own Plugin
+
+You can create plugin with following requirement:
+* `template` attribute
+* `clone()` method
+* `onCreate()` method
+* `onRender()` method
+
+For example:
+
+```javascript
+var myplugin = (function(){
+    var Plugin = function() {
+        this.template = '<div></div>';
+    };
+    Plugin.prototype = {
+        clone: function() {
+            return new Plugin();
+        },
+        onCreate: function(data) {
+            // You are allowed to return promise.
+            return this;
+        },
+        onRender: function() {
+            // do something...
+        }
+    };
+    return new Plugin();
+}());
+```
 ## Documentation
 On progress...
 

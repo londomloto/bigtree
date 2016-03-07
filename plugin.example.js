@@ -6,6 +6,10 @@ var example = (function(){
     };
 
     Plugin.prototype = {
+        /** @mandatory */
+        clone: function() {
+            return new Plugin();
+        },
         /** @cycle */
         onCreate: function(data) {
 
@@ -15,6 +19,8 @@ var example = (function(){
 
         }
     };
+    
+    return new Plugin();
 }());
 
 /** example usage */

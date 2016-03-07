@@ -103,21 +103,33 @@ For example:
 
 ```javascript
 var myplugin = (function(){
+    
     var Plugin = function() {
-        this.template = '<div></div>';
+        this.template = '<button>remove</button>';
     };
+    
     Plugin.prototype = {
         clone: function() {
-            return new Plugin();
+            return $.extend(true, {}, this);
         },
-        onCreate: function(data) {
+        onCreate: function(tree, data) {
+            this.tree = tree;
+            this.data = data;
             // You are allowed to return promise.
             return this;
         },
         onRender: function() {
-            // do something...
+            var 
+                data = this.data,
+                tree = this.tree;
+                
+            this.element.on('click', function(){
+                // do something, for example:
+                tree.remove(data);
+            });
         }
     };
+    
     return new Plugin();
 }());
 ```

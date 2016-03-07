@@ -93,7 +93,7 @@ On progress...
 
 ## Writing Your Own Plugin
 
-You can create plugin with following requirements:
+You can create plugin that meet following requirements:
 * `template` attribute
 * `clone()` method
 * `onCreate()` method

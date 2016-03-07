@@ -102,7 +102,7 @@ You can create plugin that meet following requirements:
 For example:
 
 ```javascript
-var myplugin = (function(){
+var MyPlugin = (function(){
     
     var Plugin = function() {
         this.template = '<button>remove</button>';
@@ -129,8 +129,7 @@ var myplugin = (function(){
             });
         }
     };
-    
-    return new Plugin();
+    return Plugin;
 }());
 ```
 Example usage:
@@ -138,7 +137,7 @@ Example usage:
 $('#tree').bigtree({
     markup: '<div></div>',
     plugins: [
-        myplugin
+        new MyPlugin()
     ]
 });
 ```

@@ -95,9 +95,10 @@ On progress...
 
 You can create plugin that meet following requirements:
 * `template` attribute
-* `clone()` method
-* `onCreate()` method
-* `onRender()` method
+* `placement` attribute
+* `onReady()` method
+* `onResume()` method
+* `onSuspend()` method
 
 For example:
 
@@ -106,19 +107,20 @@ var MyPlugin = (function(){
     
     var Plugin = function() {
         this.template = '<button>remove</button>';
+        this.placement = 'tail';
     };
     
     Plugin.prototype = {
-        clone: function() {
-            return $.extend(true, {}, this);
-        },
-        onCreate: function(tree, data) {
+        onReady: function(tree, data) {
             this.tree = tree;
             this.data = data;
-            // You are allowed to return promise.
-            return this;
         },
-        onRender: function() {
+        /**
+         * Trigger when element re-rendered
+         * Note: element is fresh when resumed, 
+         * so we can register any events here...
+         */
+        onResume: function() {
             var 
                 data = this.data,
                 tree = this.tree;
@@ -127,6 +129,13 @@ var MyPlugin = (function(){
                 // do something, for example:
                 tree.remove(data);
             });
+        },
+        /**
+         * Trigger when element is removed,
+         * plugin kept exists for data, only element that removed
+         */
+        onSuspend: function() {
+            
         }
     };
     return Plugin;

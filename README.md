@@ -12,11 +12,16 @@ High performance hierarchical data rendering based on nested set model (pre-orde
 
 ## Dependencies
 
-__Bigtree__ is jQuery plugin that relies on libraries:
+__Bigtree__ is jQuery plugin that relies on some libraries:
 * [jQuery](http://code.jquery.com/jquery-2.2.1.min.js)
 * [jQuery UI](http://jqueryui.com/resources/download/jquery-ui-1.11.4.zip)
 * [jQuery Throttle & Debounce](http://github.com/cowboy/jquery-throttle-debounce/raw/v1.1/jquery.ba-throttle-debounce.min.js)
 * [jsRender](https://www.jsviews.com/download/jsrender.min.js)
+
+## Install
+```
+npm install jquery-bigtree
+```
 
 ## Working Demo
 On progress...
@@ -30,7 +35,7 @@ On progress...
     <head>
     	<meta charset="UTF-8">
         <title>Bigtree</title>
-        <link type="text/css" rel="stylesheet" href="bigtree.css">
+        <link type="text/css" rel="stylesheet" href="jquery.bigtree.css">
     </head>
     <body>
     	
@@ -44,7 +49,7 @@ On progress...
         <!-- /dependencies -->
 
         <!-- core -->
-        <script src="bigtree.js"></script>
+        <script src="jquery.bigtree.js"></script>
         <!-- /core -->
         
         <!-- your app -->
@@ -95,10 +100,12 @@ On progress...
 
 You can create plugin that meet following requirements:
 * `template` attribute
-* `placement` attribute
-* `onReady()` method
-* `onResume()` method
+* `place` attribute
+* `onInit()` method
+* `onRender()` method
 * `onSuspend()` method
+* `update()` method
+* `destroy()` method
 
 For example:
 
@@ -107,23 +114,20 @@ var MyPlugin = (function(){
     
     var Plugin = function() {
         this.template = '<button>remove</button>';
-        this.placement = 'tail';
+        this.place = 'tail';
     };
     
     Plugin.prototype = {
-        onReady: function(tree, data) {
+        onInit: function(tree, data) {
             this.tree = tree;
             this.data = data;
         },
         /**
-         * Trigger when element re-rendered
-         * Note: element is fresh when resumed, 
-         * so we can register any events here...
+         * Triggered everytime add-ons re-rendered
+         * Note: element is fresh, so we can register any events here...
          */
-        onResume: function() {
-            var 
-                data = this.data,
-                tree = this.tree;
+        onRender: function() {
+            var data = this.data, tree = this.tree;
                 
             this.element.on('click', function(){
                 // do something, for example:
@@ -131,12 +135,14 @@ var MyPlugin = (function(){
             });
         },
         /**
-         * Trigger when element is removed,
+         * Triggered when element is removed,
          * plugin kept exists for data, only element that removed
          */
         onSuspend: function() {
             
-        }
+        },
+        
+        // and so on...
     };
     return Plugin;
 }());
@@ -146,7 +152,7 @@ Example usage:
 $('#tree').bigtree({
     markup: '<div></div>',
     plugins: [
-        new MyPlugin()
+        new MyPlugin({id: 'trash'})
     ]
 });
 ```

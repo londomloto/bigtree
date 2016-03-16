@@ -110,18 +110,25 @@
     }*/
 
     /**
+     * Special counter for cached template,
+     * avoids template overriding
+     *
+     * @type {Number}
+     */
+    var template = 0;
+
+    /**
      * Constructor
      */
     var BigTree = function (element, options) {
         this.element = $(element);
         this.init(options);
     };
-    
+
     /**
      * Default options
      */
     BigTree.defaults = {
-
         fields: {
             id: 'id',
             text: 'text',
@@ -178,7 +185,6 @@
      */
     BigTree.prototype = {
         init: function(options) {
-
             this.options = $.extend(true, {}, BigTree.defaults, options || {});
 
             this._buffedge = Math.floor(this.options.buffer / 2) * this.options.itemSize;
@@ -232,7 +238,7 @@
             this._registerPlugins();
 
             // setup template
-            $.templates('btnode', options.markup);
+            $.templates('btnode_' + (++template), options.markup);
 
             // init sortable
             this.element.sortable({
@@ -482,7 +488,7 @@
                 }
             }
             
-            this.grid.append($.templates.btnode(range, this._helper));
+            this.grid.append($.templates['btnode_'+template](range, this._helper));
             
             if (moved.length) {
                 this.element.sortable('refresh');

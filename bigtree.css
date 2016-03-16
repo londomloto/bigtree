@@ -1,10 +1,11 @@
 
 .bigtree {
 	/*width: 100%;
-	height: 100%;*/ 
+	height: 100%;*/
 	overflow: auto;
 	overflow-x: hidden;
 	overflow-y: scroll;
+	background: #f4f4f4;
 }
 
 .bigtree .bt-hbox {
@@ -24,7 +25,7 @@
 .bigtree .bt-flex {
 	-webkit-flex: 1;
 	-ms-flex: 1;
-    flex: 1; 
+    flex: 1;
 }
 
 .bt-grid {
@@ -41,6 +42,11 @@
 .bt-node.bt-selected .bt-node-body {
 	outline: solid 1px #FCC127;
 	border-color: #FCC127;
+}
+
+.bt-node.bt-selected .bt-drag,
+.bt-node.bt-selected .bt-node-body {
+	background-color: #ffffff !important;
 }
 
 .bt-node-elbow, 
@@ -100,12 +106,14 @@
 }
 
 .bt-node-elbow .elbow-expander.elbow-plus {
-	background-image: url(node-plus.png);
+	background-image: url(../bigtree/sprites.png);
+	background-position: 0 0;
 	background-repeat: no-repeat;
 }
 
 .bt-node-elbow .elbow-expander.elbow-minus {
-	background-image: url(node-minus.png);
+	background-image: url(../bigtree/sprites.png);
+	background-position: -18px 0;
 	background-repeat: no-repeat;
 }
 
@@ -131,16 +139,14 @@
 .bt-drag,
 .bt-text,
 .bt-editor input,
-.bt-trash,
 .bt-plugin {
 	height: 28px;
 }
 
 .bt-drag {
 	width: 16px;
-	background: #ffffff url(grip.png) no-repeat 50% 50%;
-	border: solid 1px #ccc;
-	border-width: 0 1px 0 0;
+	background: #ffffff url(../bigtree/sprites.png) no-repeat -28px -15px;
+	border-width: 0;
 	cursor: pointer;
 }
 
@@ -162,7 +168,7 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	line-height: 28px;
-	padding: 0 5px;
+	padding: 0 0 0 5px;
 	position: relative;
 	/*cursor: text;*/
 }
@@ -170,7 +176,7 @@
 .bt-editor {
 	position: absolute;
 	left: 5px;
-	right: 5px;
+	right: 0;
 	top: 0;
 	bottom: 0;
 	padding: 0;
@@ -185,20 +191,19 @@
 
 /** dragdrop */
 .bt-node-sortable.ui-sortable-placeholder {
-	background: #ffffff url(hand.png) no-repeat 5px 50%;
+	background: url(../bigtree/sprites.png) no-repeat -1px -15px;
+	width: 24px;
 	height: 32px;
 	margin-left: -15px;
 	opacity: .5;
 }
 
-/** trash */
-.bt-trash {
-	width: 20px;
-	/*background: url(../bigtree/node-trash.png) no-repeat 50% 50%;*/
-}
-
 /** plugin container */
-.bt-plugin {
-	width: 284px;
+.bt-plugin.head {
+	/*width: 100px;*/
+}
+.bt-plugin.tail {
+	width: 313px;
+	padding-left: 5px;
 	/*background: #00BCD4;*/
 }

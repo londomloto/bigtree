@@ -1,1863 +1,1829 @@
-<?php
 /**
- * Nested Set Model
+ * Bigtree
  *
- * @author PT. Kreasindo Cipta Teknologi
+ * jQuery plugin for rendering hierarchical data
+ * Dependencies:
+ *      - jQuery (https://jquery.com)
+ *      - jQuery UI (https://jqueryui.com)
+ *      - jsRender (https://www.jsviews.com)
+ *      - jQuery Throttle (http://benalman.com/pr
+ *      ojects/jquery-throttle-debounce-plugin/)
+ *
  * @author Roso Sasongko <roso@kct.co.id>
  */
-
-namespace Cores;
-
-use Phalcon\Mvc\Model\Resultset\Simple as Resultset,
-    Phalcon\Mvc\Model\Message,
-    Cores\Model,
-    Cores\Config,
-    Interfaces\ITreeModel,
-    Libraries\QueryNode;
-
-abstract class TreeModel extends Model implements ITreeModel {
+(function($, undef){
+    // preparing for striptags
+    /*var bodyre = '((?:[^"\'>]|"[^"]*"|\'[^\']*\')*)',
+        tagsre = new RegExp(
+            '<(?:'
+            + '!--(?:(?:-*[^->])*--+|-?)'
+            + '|script\\b' + bodyre + '>[\\s\\S]*?</script\\s*'
+            + '|style\\b' + bodyre + '>[\\s\\S]*?</style\\s*'
+            + '|/?[a-z]'
+            + bodyre
+            + ')>',
+            'gi'
+        );*/
     
-    const ACTION_INSERT_APPEND  = 'append';
-    const ACTION_INSERT_PREPEND = 'prepend';
-    const ACTION_INSERT_BEFORE  = 'before';
-    const ACTION_INSERT_AFTER   = 'after';
-    
-    const ACTION_MOVE_APPEND    = 'moveAppend';
-    const ACTION_MOVE_PREPEND   = 'movePrepend';
-    const ACTION_MOVE_BEFORE    = 'moveBefore';
-    const ACTION_MOVE_AFTER     = 'moveAfer';
-
-    private static $_instance;
-    private $_config = null;
-    private $_index  = null;
-    
-    public $root     = null;
-    public $parent   = null;
-    public $after    = null;
-    public $before   = null;
-    public $action   = null;
-
-    public $children = array();
-
-    private static function _getInstance() {
-        if ( ! self::$_instance) {
-            self::$_instance = new static();
-        }
-        return self::$_instance;
-    }
-    
-    private static function _buildResult($specs = array()) {
-        $base  = self::_getInstance();
-        $link  = $base->getReadConnection();
-        $alias = $base->getAlias();
-        
-        $sql = $specs['select'];
-        $var = isset($specs['params']) ? self::params($specs['params'], NULL, NULL, 'n') : array();
-
-        $var['conditions'] = isset($var['conditions']) 
-            ? preg_replace('/([\:]?)(\w+)([\:]+)/', ':$2', $var['conditions']) : '';
-
-        isset($var['columns']) || $var['columns'] = '';
-        isset($var['join']) || $var['join'] = '';
-        isset($var['group']) || $var['group'] = '';
-        isset($var['order']) || $var['order'] = '';
-        isset($var['limit']) || $var['limit'] = array();
-        isset($var['bind']) || $var['bind'] = array();
-
-        if (isset($specs['where'])) {
-            $sql .= " \n".$specs['where'] . ( ! empty($var['conditions']) ? ' AND '.$var['conditions'] : '');
-        } else {
-            $sql .= ! empty($var['conditions']) ? ' WHERE '.$var['conditions'] : '';
-        }
-
-        if (isset($specs['group'])) {
-            $sql .= " \n".$specs['group'] . ( ! empty($var['group']) ? ', '.$var['group'] : '');
-        } else {
-            $sql .= ! empty($var['group']) ? ' GROUP BY '.$var['group'] : '';
-        }
-
-        if (isset($specs['order'])) {
-            $sql .= ' '.$specs['order'] . ( ! empty($var['order']) ? ', '.$var['order'] : '');
-        } else {
-            $sql .= ! empty($var['order']) ? ' ORDER BY '.$var['order'] : '';
-        }
-
-        if (isset($specs['limit'])) {
-            $sql .= " \n".$specs['limit'];
-        } else if (isset($var['limit']['offset'], $var['limit']['number'])) {
-            $sql .= " \nLIMIT ".$var['limit']['offset'].', '.$var['limit']['number'];
-        }
-
-        $outer = 'SELECT SQL_CALC_FOUND_ROWS ';
-
-        if ( ! empty($var['columns'])) {
-            $outer .= $var['columns'].", path, depth ";
-        } else {
-            $outer .= ( ! empty($alias) ? $alias.'.* ' : '* ');
-        }
-
-        $outer .= "FROM ($sql) $alias";
-
-        if ( ! empty($var['join'])) {
-            $outer .= " \n".$var['join'];
-        }
-
-        return new Resultset(null, $base, $link->query($outer, $var['bind']));
-    }
-
-    private static function _createQuery($root, $excludeRoot = true) {
-        $base  = self::_getInstance();
-        $link  = $base->getReadConnection();
-        
-        $table = $base->getSource();
-        $index = $base->getIndex();
-        
-        $fieldLeft = $base->getParamLeft();
-        $fieldRight = $base->getParamRight();
-        $fieldRoot = $base->getParamRoot();
-        $fieldLevel = $base->getParamLevel();
-        $fieldId = $base->getParamId();
-        
-        $rootValue = $root->$fieldId;
-
-        $query = new \stdClass();
-
-        $query->select = 
-            "SELECT 
-                n.*, 
-                (COUNT(p.$fieldId) - 1) as depth, 
-                (GROUP_CONCAT(p.$fieldId ORDER BY p.$fieldLeft SEPARATOR '/')) as path 
-            FROM 
-                $table n FORCE INDEX ($index), 
-                $table p FORCE INDEX ($index)";
-
-        $query->where = 
-            "WHERE 
-                (n.$fieldLeft BETWEEN p.$fieldLeft AND p.$fieldRight) AND 
-                (n.$fieldRoot = $rootValue AND p.$fieldRoot = $rootValue)";
-
-        if ($excludeRoot) {
-            $query->where .= " AND (p.$fieldLevel > 0 )";
-        }
-
-        $query->group = "GROUP BY n.$fieldId";
-        $query->order = "ORDER BY n.$fieldLeft";
-
-        return $query;
-    }
-
-    private static function _createParams($params = array()) {
-        $result = self::params($params, NULL, NULL, 'n');
-
-        $result['conditions'] = isset($result['conditions']) 
-            ? preg_replace('/([\:]?)(\w+)([\:]+)/', ':$2', $result['conditions']) : '';
-        
-        $result['bind'] = isset($result['bind']) ? $result['bind'] : array();
-
-        return $result;
-    }
-
-    private static function _createResult($sql, $params = array()) {
-        
-        $base  = self::_getInstance();
-        $link  = $base->getReadConnection();
-        $alias = $base->getAlias();
-        
-        $vars  = self::params($params, null, null, $alias);
-
-        // wrap sql
-        $query = "SELECT SQL_CALC_FOUND_ROWS ";
-
-        if (isset($vars['columns'])) {
-            $query .= $vars['columns'];
-            $query .= ', path, depth';
-        } else {
-            $query .= ( ! empty($alias) ? $alias . '.*' : '*');
-        }
-        
-        $query .= PHP_EOL;
-        $query .= "FROM ($sql) $alias " . PHP_EOL;
-
-        if (isset($vars['join'])) {
-            $query .= $vars['join'] . PHP_EOL;
-        }
-
-        if (isset($vars['conditions'])) {
-            $conditions = preg_replace('/([\:]?)(\w+)([\:]+)/', ':$2', $vars['conditions']);
-            $query .= "WHERE $conditions " . PHP_EOL;
-        }
-
-        if (isset($vars['group'])) {
-            $query .= "GROUP BY " . $vars['group'] . PHP_EOL;
-        }
-
-        if (isset($vars['order'])) {
-            $query .= "ORDER BY " . $vars['order'] . PHP_EOL;
-        }
-
-        if (isset($vars['limit'])) {
-            $query .= sprintf("LIMIT %d, %d ", $vars['limit']['offset'], $vars['limit']['number']);
-        }
-
-        $bind = isset($vars['bind']) ? $vars['bind'] : array();
-
-        return new Resultset(null, $base, $link->query($query, $bind));
+    /**
+     * Cast element to jQuery object
+     */
+    function make(el) {
+        return el instanceof jQuery ? el : $(el);
     }
 
     /**
-     * Simple function of Model::findFirst()
+     * Get index of element from array.
+     * This is fastest method rather than using Array.indexOf by avoiding
+     * several type checking. See polyfill:
+     * https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Global_Objects/Array/indexOf
      */
-    private static function _findFirst($id, $columns = '*') {
-        $base  = self::_getInstance();
-        
-        $link  = $base->getReadConnection();
-        $table = $base->getSource();
-
-        $bind = array();
-
-        if (is_array($columns)) 
-            $columns = implode(',', $columns);
-
-        $sql = "SELECT $columns FROM $table WHERE 1 = 1 ";
-
-        if (is_numeric($id)) {
-            $bind[$base->getParamId()] = $id;
-        } else {
-            $bind = $id;
-        }
-
-        $where = array();
-
-        foreach($bind as $k => $v) 
-            $where[] = "$k = :$k";
-            
-        if ( ! empty($where)) 
-            $sql .= ' AND ('.implode(' AND ', $where).') ';
-
-        $sql .= 'LIMIT 1';
-        return $link->fetchOne($sql, \Phalcon\Db::FETCH_ASSOC, $bind);
-    }
-
-    private static function _findRoot($node) {
-        $fieldId = $node->getParamId();
-        $fieldRoot = $node->getParamRoot();
-        $fieldLevel = $node->getParamLevel();
-
-        $params = array();
-
-        $params[$fieldLevel] = 0;
-        $params[$fieldId] = $node->$fieldRoot;
-        
-        $root = self::_findFirst($params, $fieldId);
-
-        return (object) $root;
-    }
-
-    public function initialize() {
-        parent::initialize();
-
-        if ( ! $this->_index) {
-            $link  = $this->getReadConnection();
-            $table = $this->getSource();
-            $index = $table.'_tree';
-            $base = self::_getInstance();
-
-            $key = $base->getParamId();
-            $root  = $base->getParamRoot();
-
-            $found = $link->fetchOne(
-                "SHOW INDEX FROM $table WHERE Key_name = '$index'", 
-                \Phalcon\Db::FETCH_ASSOC
-            );
-
-            if ( ! $found) {
-                $link->query("CREATE INDEX $index ON $table ($root,$key) USING BTREE");
+    function indexof(array, elem) {
+        var size = array.length, i = 0;
+        while(i < size) {
+            if (array[i] === elem) {
+                return i;
             }
-
+            i++;
         }
+        return -1;
     }
 
-    public function getIndex() {
-        return $this->getSource().'_tree';
+    function firstof(array) {
+        array = array || [];
+        return array[0];
     }
 
-    public function setupNode(Array $config) {
-
-        // prepare config 'fields'
-        if ( ! isset($config['fields'])) {
-            $this->exception('Config \'fields\' is required!');
-        }
-
-        if ( ! isset($config['fields']['root'])) {
-            $this->exception('Config \'fields => root\' is required!');
-        }
-
-        if ( ! isset($config['fields']['level'])) {
-            $this->exception('Config \'fields => level\' is required!');
-        }
-
-        if ( ! isset($config['fields']['left'])) {
-            $this->exception('Config \'fields => left\' is required!');
-        }
-
-        if ( ! isset($config['fields']['right'])) {
-            $this->exception('Config \'fields => right\' is required!');
-        }   
-
-        if ( ! isset($config['fields']['parent'])) {
-            $config['fields']['parent'] = 'pid';
-        }
-
-        // prepare config 'alias'
-        if ( ! isset($config['alias'])) {
-            $config['alias'] = 'tree';
-        }
-
-        $this->_config = new Config($config);
-        $this->_bm = $this->getDI()->get('benchmark', true);
-
+    function lastof(array) {
+        array = array || [];
+        return array[array.length - 1];
     }
 
-    public function getNodeConfig($key = null) {
-        $config = $this->_config;
-        if ( ! empty($key)) {
-            if ($config->offsetExists($key)) {
-                return $config->$key;
-            }
-            return null;
-        }
-        return $config;
-    }
+    /**
+     * Select text inside particular input field.
+     * Don't confuse with $.select, which actualy used for triggering `select` event.
+     */
+    function seltext(input, beg, end) {
+        var dom = input[0], range;
 
-    public function getParamRoot() {
-        return $this->_config->fields->root;
-    }
-
-    public function getParamLevel() {
-        return $this->_config->fields->level;
-    }
-
-    public function getParamLeft() {
-        return $this->_config->fields->left;
-    }
-
-    public function getParamRight() {
-        return $this->_config->fields->right;
-    }
-
-    public function getParamId() {
-        return $this->getModelsMetadata()->getIdentityField($this);
-    }
-
-    public function getParamPid() {
-        return $this->_config->fields->parent;
-    }
-
-    public function getAlias() {
-        return $this->_config->alias;
-    }
-
-    public function getRootValue() {
-        $field = $this->getParamRoot();
-        return (int) $this->$field;
-    }
-
-    public function getLevelValue() {
-        $field = $this->getParamLevel();
-        return (int) $this->$field;
-    }
-
-    public function getLeftValue() {
-        $field = $this->getParamLeft();
-        return (int) $this->$field;
-    }
-
-    public function getRightValue() {
-        $field = $this->getParamRight();
-        return (int) $this->$field;
-    }
-
-    public function getIdValue() {
-        $field = $this->getParamId();
-        return $field ? (int) $this->$field : null;
-    }
-
-    public function getParentValue() {
-        $field = $this->getParamPid();
-        $value = $this->$field;
-
-        if (is_null($value)) {
-            if ($this->isRoot()) {
-                $value = -1;
-            } else {
-                $path = $this->getPathValue();
-                $part = explode('/', $path);
-                array_pop($part);
-                $value = (int) array_pop($part);    
-            }
-        } else {
-            $value = $this->isRoot() ? -1 : $value;
-        }
-        return $value;
-    }
-
-    public function getPreviousValue() {
-        $previous = $this->getPrevious();
-        return $previous ? $previous->getIdValue() : null;
-    }
-
-    public function getNextValue() {
-        $next = $this->getNext();
-        return $next ? $next->getIdValue() : null;
-    }
-
-    public function getDepthValue() {
-        return isset($this->depth) ? (int) $this->depth : 0;
-    }
-
-    public function getPathValue($exroot = TRUE) {
-        $path = isset($this->path) ? $this->path : '';
-        if ($exroot) {
-            $part = explode('/', $path);
-            $root = $this->getRootValue();
-
-            if (isset($part[0]) && $part[0] == $root)
-                array_shift($part);
-
-            return implode('/', $part);
-        }
-        return $path;
-    }
-
-    public function getPathBy($field = '*', $separator = '/', $exroot = TRUE) {
-        if (empty($field)) $field = '*';
-
-        $table = $this->getSource();
-        $fieldId = $this->getParamId();
-        $fieldLeft = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldRoot = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
+        beg = beg === undef ? 0 : beg;
+        end = end === undef ? input.val().length : end;
         
-        $idValue = $this->getIdValue();
-        $rootValue = $this->getRootValue();
-
-        $select = "SELECT 
-                    p.$field
-                FROM 
-                    $table n, 
-                    $table p";
-        $where = "WHERE 
-                    (n.$fieldLeft BETWEEN p.$fieldLeft AND p.$fieldRight) 
-                    AND n.$fieldRoot = $rootValue 
-                    AND p.$fieldRoot = $rootValue 
-                    AND n.$fieldId = $idValue ";
-
-        if ($exroot) {
-            $where .= "AND p.$fieldLevel > 0 ";
-        }
-
-        $order = "ORDER BY n.$fieldLeft";
-
-        $result = $this->_buildResult(array(
-            'select' => $select,
-            'where' => $where,
-            'order' => $order
-        ));
-
-        if ($result->count() > 0) {
-            if (strpos($field, '*') !== FALSE || strpos($field, ',') !== FALSE) {
-                return $result;
-            } else {
-                $array = array_map(function($item) use ($field) { return trim($item[$field]); }, $result->toArray());
-                return implode($separator, $array);
+        if (dom.setSelectionRange) {
+            dom.setSelectionRange(beg, end);
+            if (/chrom(e|ium)/.test(navigator.userAgent.toLowerCase())) {
+                var evt = jQuery.Event('keydown', {which: 37});
+                input.triggerHandler(evt);
             }
+        } else if (dom.createTextRange) {
+            range = dom.createTextRange();
+            range.collapse(true);
+            range.moveEnd('character', end);
+            range.moveStart('character', beg);
+            range.select();
+        }
+    }
+
+    function debug() {
+        var 
+            args = $.makeArray(arguments),
+            arr = ['[' + args.shift() + ']'];
+
+        for (var i = 0, j = args.length; i < j; i++) {
+            arr.push(' ; ');
+            arr.push(args[i]);
         }
 
-        return false;
+        console.log.apply(console, arr);
     }
 
-    public function isRoot() {
-        return $this->getLevelValue() == 0;
-    }
+    /**
+     * Sanitize (remove) html tags from string
+     */
+    /*function striptags(txt) {
+        var old;
+        do {
+            old = txt;
+            txt = txt.replace(tagsre, '');
+        } while (txt != old);
+        return txt.replace(/</g, '&lt;');
+    }*/
 
-    public function isParent() {
-        return $this->hasChildren();
-    }
-
-    public function isLeaf() {
-        return ($this->getRightValue() - $this->getLeftValue()) == 1;
-    }
-
-    public function isLeftMost() {
-
-    }
-
-    public function isRightMost() {
-        
-    }
-
-    public function hasChildren() {
-        return ($this->getRightValue() - $this->getLeftValue()) > 1;
-    }
-
-    public function hasParent() {
-        // $path = $this->getPathValue();
-        return ! $this->isRoot();
-    }
-
-    public function isPhantom() {
-        return $this->getDirtyState() != Model::DIRTY_STATE_PERSISTENT;
-    }
-
-    // @Override
-    public function toArray($columns = NULL, $excludeRoot = TRUE) {
-        $array = parent::toArray($columns);
-
-        if ($excludeRoot) {
-            $array['depth'] = isset($this->depth) ? (int) $this->depth - 1 : 0;
-        } else {
-            $array['depth'] = 
-        }
-
-        $array['depth'] = isset($this->depth) ? $this->depth : NULL;
-        $array['path'] = isset($this->path) 
-            ? ($excludeRoot 
-                ? $this->getPathValue(TRUE) 
-                : $this->path)
-            : NULL;
-
-        $array['pid']   = $this->getParentValue();
-        
-        return $array;
-    }
-
-    // @Override
-    public function toScalar($related = true) {
-        $scalar = parent::toScalar($related);
-        $scalar->depth = isset($this->depth) ? $this->depth : null;
-        $scalar->path = isset($this->path) ? $this->path : null;
-        $scalar->pid = $this->getParentValue();
-        
-        return $scalar;
-    }
-
-    public function createRoot($data = array()) {
-        
-        $fieldRoot  = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
-        $fieldLeft  = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldId    = $this->getParamId();
-        $fieldPid   = $this->getParamPid();
-
-        if (method_exists($this, 'getDefaultValues')) {
-            $defaults = $this->getDefaultValues();
-            foreach($defaults as $key => $val) {
-                $this->$key = $val;
-            }
-        }
-
-        if (count($data) > 0) {
-            foreach($data as $key => $val) {
-                $this->$key = $val;
-            }
-        }
-
-        if (method_exists($this, 'onBeforeCreateRoot')) {
-            $this->onBeforeCreateRoot();
-        }
-
-        $this->$fieldPid   = -1;
-        $this->$fieldLevel = 0;
-        $this->$fieldLeft  = 1;
-        $this->$fieldRight = 2;
-
-        if ($this->save()) {
-
-            // update root field
-            $this->$fieldRoot = $this->getIdValue();
-            $this->save();
-
-            // update with depth and path
-            $this->depth = 0;
-            $this->path  = (string) $this->getIdValue();
-
-            return true;
-        }
-
-        return false;
-    }
+    /**
+     * Constructor
+     */
+    var BigTree = function (element, options) {
+        this.element = $(element);
+        this.init(options);
+    };
     
-    public function append(Model $node) {
-        $node->root   = $this->isRoot() ? $this : $this->getRoot();
-        $node->parent = $this;
+    /**
+     * Default options
+     */
+    BigTree.defaults = {
 
-        if ($node->isPhantom()) {
-            $node->action = self::ACTION_INSERT_APPEND;
-            return $node->createNode();
-        } else {
-            $node->action = self::ACTION_MOVE_APPEND;
-            return $node->moveNode();
-        }
+        fields: {
+            id: 'id',
+            text: 'text',
+            left: 'left',
+            right: 'right',
+            level: 'level',
+            leaf: 'leaf',
+            path: 'path',
+            expand: 'expand'
+        },
 
-    }
-
-    public function prepend(Model $node) {
-        $node->root   = $this->isRoot() ? $this : $this->getRoot();
-        $node->parent = $this;
-
-        if ($node->isPhantom()) {
-            $node->action = self::ACTION_INSERT_PREPEND;
-            return $node->createNode();
-        } else {
-            $node->action = self::ACTION_MOVE_PREPEND;
-            return $node->moveNode();
-        }
-
-    }   
-
-    public function appendTo(Model $parent, $data = array()) {
-        $this->root   = $parent->isRoot() ? $parent : $parent->getRoot();
-        $this->parent = $parent;
-
-        if ($this->isPhantom()) {
-            $this->action = self::ACTION_INSERT_APPEND;
-            return $this->createNode($data);    
-        } else {
-            $this->action = self::ACTION_MOVE_APPEND;
-            return $this->moveNode();
-        }
-    }
-
-    public function prependTo(Model $parent, $data = array()) {
-        $this->root   = $parent->isRoot() ? $parent : $parent->getRoot();
-        $this->parent = $parent;
-
-        if ($this->isPhantom()) {
-            $this->action = self::ACTION_INSERT_PREPEND;
-            return $this->createNode($data);    
-        } else {
-            $this->action = self::ACTION_MOVE_PREPEND;
-            return $this->moveNode();
-        }
+        // item height
+        itemSize: 32,
         
-    }
-
-    public function insertBefore(Model $before) {
-        if ( ! $before) {
-            $this->addMessage("Target node paramater is required!");
-            return false;
-        }
-
-        if ($before->isPhantom()) {
-            $this->addMessage("Can't create node when target node is new!");
-            return false;
-        }
+        // drag handle width
+        dragSize: 16,
         
-        $this->root   = $before->getRoot();
-        $this->parent = $before->getParent();
-        $this->before = $before;
-
-        if ($this->isPhantom()) {
-            $this->action = self::ACTION_INSERT_BEFORE;
-            return $this->createNode(); 
-        } else {
-            $this->action = self::ACTION_MOVE_BEFORE;
-            return $this->moveNode();
-        }
-
-    }
-
-    public function insertAfter(Model $after) {
-        if ( ! $after) {
-            $this->addMessage("Target node paramater is required!");
-            return false;
-        }
-
-        if ($after->isPhantom()) {
-            $this->addMessage("Can't create node when target node is new!");
-            return false;
-        }
-
-        $this->root = $after->getRoot();
-        $this->parent = $after->getParent();
-        $this->after = $after;
-
-        if ($this->isPhantom()) {
-            $this->action = self::ACTION_INSERT_AFTER;
-            return $this->createNode(); 
-        } else {
-            $this->action = self::ACTION_MOVE_AFTER;
-            return $this->moveNode();
-        }
-    }
-
-    public function createNode($data = array()) {
-        // validate root
-        if ( ! $this->root) {
-            $this->addMessage('Root node parameter is required!');
-            return false;
-        }
-
-        if ($this->root->isPhantom()) {
-            $this->addMessage("Can't create node when root node is new!");
-            return false;
-        }
-
-        $root   = $this->root;
-        $parent = $this->parent ? $this->parent : $root;
+        // level width
+        stepSize: 25,
         
-        // refresh root & parent (get actual data)
-        if ( ! $parent->isRoot()) {
-            $root->refreshNode();
-            $parent->refreshNode(); 
-        } else {
-            $parent->refreshNode();
-        }
+        // gutter from left
+        buffSize: 20,
 
-        $action = $this->action;
+        // scroll speed
+        delay: 30,
 
-        // validate parent
-        if ($parent->isPhantom()) {
-            $this->addMessage("Can't create node when parent node is new!");
-            return false;
-        }
+        // leading & trailing rendered nodes
+        buffer: 6,
 
-        // validate action
-        if ( ! $action) {
-            $action = self::ACTION_INSERT_APPEND;
-        }
+        // node markup, can contains templating tags supported by jsRender
+        markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+
+                    'data-id="{{:id}}" '+
+                    'data-level="{{:level}}" '+
+                    'data-leaf="{{:leaf}}">'+
+                    '{{for _elbows}}'+
+                        '<div class="bt-node-elbow {{:type}}">{{:icon}}</div>'+
+                    '{{/for}}'+
+                    '<div class="bt-node-body bt-flex bt-hbox">'+
+                        '<div class="bt-drag"></div>'+
+                        '<div class="bt-plugin head"></div>'+
+                        '<div class="bt-text bt-flex bt-hbox">{{:text}}</div>'+
+                        '<div class="bt-plugin tail"></div>'+
+                        '<div class="bt-trash"></div>'+
+                    '</div>'+
+                '</div>',
 
-        $link  = $this->getWriteConnection();
-        $table = $this->getSource();
+        plugins: [],
 
-        $fieldLeft   = $this->getParamLeft();
-        $fieldRight  = $this->getParamRight();
-        $fieldRoot   = $this->getParamRoot();
-        $fieldLevel  = $this->getParamLevel();
-        $fieldId     = $this->getParamId();
-        $fieldPid    = $this->getParamPid();
-        
-        $rootValue   = $root->getIdValue();
-        
-        $pidValue    = $parent->getIdValue();
+        debug: true
+    };
 
-        if ($parent->isRoot()) {
-            $pidValue = 0;
-        }
+    /**
+     * Prototype
+     */
+    BigTree.prototype = {
+        init: function(options) {
 
-        $parentDepth = $parent->getDepthValue();
-        $parentPath  = $parent->getPathValue();
+            this.options = $.extend(true, {}, BigTree.defaults, options || {});
 
-        $position = null;
-        $level    = null;
+            this._buffedge = Math.floor(this.options.buffer / 2) * this.options.itemSize;
+            this._data = [];
+            this._indexes = {};
 
-        switch($action) {
-            case self::ACTION_INSERT_APPEND:
-                $position = $parent->getRightValue();
-                $level    = $parent->getLevelValue() + 1;
-                break;
-            case self::ACTION_INSERT_PREPEND:
-                $position = $parent->getLeftValue() + 1;
-                $level    = $parent->getLevelValue() + 1;
-                break;
-            case self::ACTION_INSERT_BEFORE:
-                $before   = $this->before;
-                $before->refreshNode();
+            this._visible = [];
+            this._message = '';
+            this._uuid = []; 
 
-                $position = $before->getLeftValue();
-                $level    = $before->getLevelValue();
-                break;
-            case self::ACTION_INSERT_AFTER:
-                $after    = $this->after;
-                $after->refreshNode();
-                $position = $after->getRightValue() + 1;
-                $level    = $after->getLevelValue();
-                break;
-            default:
-                $this->addMessage("Action $action is not supported!");
-                return false;
-        }
+            this._helper = {};
 
-        $result = false;
-        
-        try {
-            $link->begin();
+            this._initComponent();
+            this._initEvents();
+            this._fireEvent('init');
 
-            // Create new space for node
-            $sql = "UPDATE $table SET $fieldLeft = $fieldLeft + 2 
-                    WHERE $fieldLeft >= $position AND $fieldRoot = $rootValue";
+        },
+        _guid: function() {
 
-            $link->execute($sql);
+            if ( ! this._uuid.length)
+                for (var i = 0; i < 256; i++)
+                    this._uuid[i] = (i < 16 ? '0' : '') + (i).toString(16);
 
-            $sql = "UPDATE $table SET $fieldRight = $fieldRight + 2 
-                    WHERE $fieldRight >= $position AND $fieldRoot = $rootValue";
+            var 
+                uu = this._uuid,
+                d0 = Math.random()*0xffffffff|0,
+                d1 = Math.random()*0xffffffff|0,
+                d2 = Math.random()*0xffffffff|0,
+                d3 = Math.random()*0xffffffff|0;
 
-            $link->execute($sql);
+            return uu[d0&0xff]+uu[d0>>8&0xff]+uu[d0>>16&0xff]+uu[d0>>24&0xff]+
+                uu[d1&0xff]+uu[d1>>8&0xff]+
+                uu[d1>>16&0x0f|0x40]+uu[d1>>24&0xff]+
+                uu[d2&0x3f|0x80]+uu[d2>>8&0xff]+
+                uu[d2>>16&0xff]+uu[d2>>24&0xff]+
+                uu[d3&0xff]+uu[d3>>8&0xff]+uu[d3>>16&0xff]+uu[d3>>24&0xff];
+        },
+        /** @private */
+        _initComponent: function() {
+            var 
+                options = this.options,
+                fields = options.fields;
 
-            if (method_exists($this, 'getDefaultValues')) {
-                $defaults = $this->getDefaultValues();
-                if (is_array($defaults)) {
-                    foreach($defaults as $key => $val) {
-                        $this->$key = $val;
+            this.element.addClass('bigtree').attr('tabindex', 1);
+
+            this.editor = $('<div class="bt-editor"><input type="text"></div>');
+            this.edtext = this.editor.children('input');
+            this.grid   = $('<div class="bt-grid">').appendTo(this.element);
+
+            // init user plugins
+            this._registerPlugins();
+
+            // setup template
+            $.templates('btnode', options.markup);
+
+            // init sortable
+            this.element.sortable({
+                items: '.bt-node',
+                handle: '.bt-drag',
+                placeholder: 'bt-node-sortable ui-sortable-placeholder'
+            });
+
+            
+        },
+        /** @private */
+        _initEvents: function() {
+            var options = this.options;
+
+            this._scrolltop = this.element.scrollTop();
+            this._scrolldir = '';
+            this._scrolldif = 0;
+
+            // unbinds
+            this.element.off('scroll.bt click.bt.expander keydown.bt sortstart.bt sortstop.bt click.bt.select click.bt.startedit');
+            this.edtext.off('click.bt keypress.bt');
+
+            this.element.on({
+                'scroll.bt': $.debounce(options.delay, $.proxy(this._onScroll, this)),
+                'keydown.bt': $.proxy(this._onNavigate, this),
+                'sortstart.bt': $.proxy(this._onBeforeDrag, this),
+                'sortstop.bt': $.proxy(this._onAfterDrag, this),
+                'click.bt.select': $.proxy(function(){ this.deselectAll(); }, this)
+            });
+
+            this.element.on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
+
+            this.element.on('click.bt.startedit', '.bt-text', $.proxy(function(e){
+                e.stopPropagation();
+                var node = $(e.currentTarget).closest('.bt-node');
+                this._startEdit(node);
+            }, this));
+
+            this.edtext.on({
+                'click.bt': function(e){
+                    e.preventDefault();
+                    e.stopPropagation();
+                },
+                'keypress.bt': $.proxy(function(e){
+                    if (e.keyCode === 13) {
+                        e.preventDefault();
+                        this._stopEdit(false);
+                    }
+                }, this)
+            });
+        },
+        /** @private */
+        _registerPlugins: function() {
+            var 
+                plugins = this.options.plugins,
+                markup = $(this.options.markup),
+                tail = markup.find('.bt-plugin.tail'),
+                head = markup.find('.bt-plugin.head'),
+                regex = new RegExp('({[^{]+)this.', 'g');
+
+            $.each(plugins, $.proxy(function(i, p){
+                if (p.template) {
+                    // mandatory function
+                    var proto = p.constructor.prototype;
+
+                    if (proto.update === undef) {
+                        $.extend(proto, {update: $.noop})
+                    }
+
+                    p.id = p.id === undef ? i : p.id;
+                    // we need to replace some placeholder
+                    p.templateString = p.template; // save orig
+                    p.template = p.template.replace(regex, '$1__' + p.id + '__');
+
+                    var prop, key;
+
+                    for (var prop in p) {
+                        if (p.hasOwnProperty(prop)) {
+                            if ($.type(p[prop]) === 'function') {
+                                key = '__' + p.id + '__' + prop;
+                                this._helper[key] = p[prop];
+                            }
+                        }
+                    }
+
+                    $(p.template).attr('data-plugin-id', p.id).appendTo(p.place == 'tail' ? tail : head);
+                }    
+            }, this));
+
+            markup = $('<div>').append(markup).remove().html();
+            regex  = null;
+
+            this.options.markup = markup;
+        },
+
+        /** @private */
+        _reindex: function(start, stop) {
+            var fields = this.options.fields, i;
+            
+            start = start === undef ? 0 : start;
+            stop  = stop  === undef ? this._data.length : stop;
+
+            for (i = start; i < stop; i++)  {
+                this._indexes[this._data[i][fields.id]] = i;
+            }
+        },
+        /** @private */
+        _rebuild: function(start, stop) {
+            var 
+                fields = this.options.fields,
+                root = null;
+
+            var i;
+            
+            start = start === undef ? 0 : start;
+            stop  = stop  === undef ? this._data.length : stop;
+
+            if (start > 0 && this._data[start]) {
+                root  = this._data[start]._root || null;
+            }
+
+            for (i = start; i < stop; i++) {
+                var 
+                    cur = this._data[i],
+                    key = cur[fields.id];
+
+                // actualy prepare for metadata
+                cur._elbows = [];
+                cur._level  = 0;
+
+                if (+cur[fields.level] === 0) {
+                    if (root) {
+                        root._last = false;
+                    }
+                    
+                    cur._root   = null;
+                    cur._parent = null;
+                    cur._last   = true;
+                    cur._hidden = false;
+
+                    root = cur;
+                } else  {
+                    var pid = cur[fields.path].split('/'), par, chd;
+
+                    pid.pop();
+                    pid = pid.pop();
+
+                    par = this._data[this._indexes[pid]];
+                    par._child = par._child || [];
+
+                    chd = this._data[this._indexes[lastof(par._child)]];
+                    if (chd) chd._last = false;
+
+                    cur._root   = root;
+                    cur._parent = par;
+                    cur._last   = true;
+                    cur._hidden = +par[fields.expand] === 0 || par._hidden;
+
+                    par._child.push(cur[fields.id]);
+                }
+
+                cur._metachanged = true;
+                
+            }
+        },
+        /** @private */
+        _renderRange: function(stacks, start, end) {
+            var 
+                plugins = this.options.plugins,
+                fields = this.options.fields,
+                range = stacks.slice(start, end),
+                moved = this.movedNode(),
+                psize = plugins.length;
+
+            if (moved.length) {
+                range = $.grep(range, function(d){
+                    return d[fields.id] != moved.attr('data-id');
+                });
+            }
+            
+            this._suspendPlugins(this._visible);
+
+            this.editor.detach();
+            this.removableNodes().remove();
+
+            this._ranges = [start, end];
+            this._visible = range;
+            this._fireEvent('beforerender', range);
+
+            // prepare rendering node
+            for (var i = 0, ii = range.length; i < ii; i++) {
+                var data = range[i];
+
+                if (data._metachanged) {
+                    data._metachanged = false;
+                    var
+                        isexpand = +data[fields.expand] === 1,
+                        isparent = +data[fields.leaf] === 0,
+                        level = +data[fields.level],
+                        elbows = [],
+                        lines = [],
+                        owner = data._parent;
+
+                    var type, icon, cls;
+                        
+                    while(owner) {
+                        lines[owner[fields.level]] = owner._last ? 0 : 1;
+                        owner = owner._parent;
+                    }
+
+                    for (var j = 0; j <= level; j++) {
+                        if (j === level) {
+                            type = 'elbow-end';
+                            icon = isparent 
+                                ? '<span class="elbow-expander ' + (isexpand ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
+                                : '';
+                        } else {
+                            type = lines[j] === 1 ? 'elbow-line' : '';
+                            icon = '';
+                        }
+                        elbows.push({
+                            type: type,
+                            icon: icon
+                        });
+                    }
+                    data._elbows = elbows;
+                }
+
+                // attach plugins
+                var k, p, n;
+
+                if (data.plugins === undef) {
+                    data.plugins = {};
+                    for (k = 0; k < psize; k++) {
+                        p = $.extend({}, plugins[k]);
+                        data.plugins[p.id] = p;
+                        p.onInit(this, data);
+                        p.update();
+                        this._mixinData(data, p);
+                    }
+                } else {
+                    for (n in data.plugins) {
+                        p = data.plugins[n];
+                        p.update();
+                        this._mixinData(data, p);
                     }
                 }
             }
+            
+            this.grid.append($.templates.btnode(range, this._helper));
+            
+            if (moved.length) {
+                this.element.sortable('refresh');
+            } else {
+                this._decorate();
+            }
 
-            if (is_array($data)) {
-                foreach($data as $key => $val) {
-                    $this->$key = $val;
+            var visnode = this.visibleNodes();
+
+            this._renderPlugins(this._visible, visnode);
+            this._fireEvent('render', visnode, this._visible);
+        },
+        /** @private */
+        _decorate: function() { 
+            if (this._selected) {
+                var snode = this.grid.find('.bt-node[data-id='+this._selected+']');
+                if (snode.length) this.select(snode);
+            }
+        },
+        /** @private */
+        _mixinData: function(data, plugin) {
+            if (plugin.templateString && ! /this\./g.test(plugin.templateString)) {
+                return;
+            }
+
+            var id = plugin.id;
+            var value, prop, type, key;
+
+            data.mixins = data.mixins || {};
+
+            if (data.mixins[id] === undef) {
+                data.mixins[id] = {};
+                for (prop in plugin) {
+                    if (plugin.hasOwnProperty(prop)) {
+                        value = plugin[prop];
+                        type = $.type(value);
+
+                        // we only permit scalar & literal object
+                        if ((' node element template templateString '.indexOf(prop) > -1) || 
+                            (type == 'function') || 
+                            (type == 'object' && value.constructor !== Object) || 
+                            (value == this || value == data)
+                        ) { continue; }
+
+                        // create protected key
+                        key = '__' + plugin.id + '__' + prop; 
+                        data[key] = plugin[prop];
+                        data.mixins[id][key] = prop;
+                    }
+                }
+            } else {
+                for (key in data.mixins[id]) {
+                    prop = data.mixins[id][key];
+                    data[key] = plugin[prop];
                 }
             }
-
-            $this->$fieldRoot  = $rootValue;
-            $this->$fieldPid   = $pidValue;
-            $this->$fieldLeft  = $position;
-            $this->$fieldRight = $position + 1; 
-            $this->$fieldLevel = $level;
-
-            if ($this->create()) {
-                $link->commit();
-
-                $idValue     = $this->getIdValue();
-                $this->depth = $parentDepth + 1;
-                $this->path  = $parentPath ? ($parentPath . '/' . $idValue) : $idValue;
-
-                $result = true;
-            } else {
-                $link->rollback();
-            }
-
-        } catch(\Exception $e) {
-            $result = false;
-
-            $link->rollback();
-            $this->addMessage($e->getMessage());
-        }
-
-        // invalidate operation
-        $this->action = null;
-        $this->root   = null;
-        $this->parent = null;
-        $this->before = null;
-        $this->after  = null;
-
-        return $result;
-    }
-
-    public function updateNode($data = array()) {
-        // restrict update
-        $excludes = array_values($this->_config->fields->toArray());
-        
-        // refresh node
-        $this->refreshNode();
-
-        if (is_array($data)) {
-            foreach($data as $key => $val) {
-                if (in_array($key, $excludes)) continue;
-                $this->$key = $val;
-            }
-        }
-
-        return $this->update();
-    }
-
-    /**
-     * Delete current node and his children if needed
-     *
-     * @param  boolean $cascade TRUE to delete children
-     *
-     * @return boolean
-     */
-    public function deleteNode($cascade = true) {
-
-        if ($this->isRoot()) {
-            $this->addMessage("Can't delete root node!");
-            return false;
-        }
-
-        // refresh node
-        $this->refreshNode();
-
-        $link  = $this->getWriteConnection();
-        $table = $this->getSource();
-
-        $fieldLeft  = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldRoot  = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
-        
-        $leftValue  = $this->getLeftValue();
-        $rightValue = $this->getRightValue();
-        $rootValue  = $this->getRootValue();
-
-        $result = false;
-
-        try {
-            $link->begin();
-
-            if ($cascade) {
-                // delete node and children
-                $sql = "DELETE FROM $table 
-                        WHERE 
-                            ($fieldLeft >= $leftValue AND $fieldRight <= $rightValue) 
-                            AND $fieldRoot = $rootValue";
-
-                $link->execute($sql);
-
-                // fix hole after deletion
-                $offset = $rightValue + 1;
-                $delta  = $leftValue - $rightValue - 1;
-
-                $sql = sprintf(
-                    "UPDATE $table SET $fieldLeft = $fieldLeft %+d 
-                     WHERE $fieldLeft >= $offset AND $fieldRoot = $rootValue",
-                     $delta
-                );
-
-                $link->execute($sql);
-
-                $sql = sprintf(
-                    "UPDATE $table SET $fieldRight = $fieldRight %+d 
-                    WHERE $fieldRight >= $offset AND $fieldRoot = $rootValue",
-                    $delta
-                );
-
-                $link->execute($sql);
-
-                $link->commit();
-                $result = true;
-
-            } else {
-
-                if ($this->delete()) {
-                    // move children to existing parent
-                    $sql = "UPDATE $table SET 
-                                $fieldLeft = $fieldLeft - 1,
-                                $fieldRight = $fieldRight - 1,
-                                $fieldLevel = $fieldLevel - 1
-                            WHERE 
-                                ($fieldLeft >= $leftValue AND $fieldRight <= $rightValue)
-                                AND $fieldRoot = $rootValue";
-
-                    $link->execute($sql);
-
-                    // fix hole
-                    $offset = $rightValue + 1;
-                    $delta  = -2;
-
-                    $sql = sprintf(
-                        "UPDATE $table SET $fieldLeft = $fieldLeft %+d 
-                         WHERE $fieldLeft >= $offset AND $fieldRoot = $rootValue",
-                        $delta
-                    );
-
-                    $link->execute($sql);
-
-                    $sql = sprintf(
-                        "UPDATE $table SET $fieldRight = $fieldRight %+d 
-                         WHERE $fieldRight >= $offset AND $fieldRoot = $rootValue", 
-                         $delta
-                    );
+        },
+        /** @private */
+        _renderPlugins: function(datas, nodes) {
+            var node, data, name, plugin;
+            for (var i = 0, ii = nodes.length; i < ii; i++) {
+                node = $(nodes[i]);
+                data = datas[i];
+                for (name in data.plugins) {
+                    plugin = data.plugins[name];
                     
-                    $link->execute($sql);
-                    $link->commit();
-
-                    $result = true;
-                } else {
-
-                    $link->rollback();
-                    $result = false;
+                    if (plugin.element) {
+                        plugin.element.remove();
+                        plugin.element = null;
+                        plugin.node = null;
+                    }
+                    
+                    plugin.node = node;
+                    plugin.element = node.find('[data-plugin-id='+plugin.id+']');
+                    plugin.onRender();
 
                 }
-
             }
-            
-        } catch (\Exception $e) {
-            $link->rollback();
-            $this->addMessage($e->getMessage());
+        },
+        /** @private */
+        _suspendPlugins: function(datas) {
+            for (var i = 0, ii = datas.length; i < ii; i++) {
+                for (var name in datas[i].plugins) {
+                    datas[i].plugins[name].onSuspend();
+                }
+            }
+        },
+        /** @private */
+        _isvalid: function(data, type, dest) {
+            var fields = this.options.fields;
 
-            $result = false;
-        }
-        
-        return $result;
-    }
-
-    public static function move(Model $node, $npos) {
-        $result = FALSE;
-
-        $link  = $node->getWriteConnection();
-        $table = $node->getSource();
-
-        $lft = $node->getParamLeft();
-        $rgt = $node->getParamRight();
-        $rdn = $node->getParamRoot();
-
-        // short var for readibilty
-        $p = $npos;
-        $l = (int) $node->$lft;
-        $r = (int) $node->$rgt;
-        $n = (int) $node->$rdn;
-
-        try {
-            $link->begin();
-
-            $sql = "UPDATE $table
-                    SET 
-                        $lft = $lft + IF ($p > $r,
-                            IF ($r < $lft AND $lft < $p,
-                                $l - $r - 1,
-                                IF ($l <= $lft AND $lft < $r,
-                                    $p - $r - 1,
-                                    0
-                                )
-                            ),
-                            IF ($p <= $lft AND $lft < $l,
-                                $r - $l + 1,
-                                IF ($l <= $lft AND $lft < $r,
-                                    $p - $l,
-                                    0
-                                )
-                            )
-                        ),
-                        $rgt = $rgt + IF ($p > $r,
-                            IF ($r < $rgt AND $rgt < $p,
-                                $l - $r - 1,
-                                IF ($l < $rgt AND $rgt <= $r,
-                                    $p - $r - 1,
-                                    0
-                                )
-                            ),
-                            IF ($p <= $rgt AND $rgt < $l,
-                                $r - $l + 1,
-                                IF ($l < $rgt AND $rgt <= $r,
-                                    $p - $l,
-                                    0
-                                )
-                            )
-                        )
-                    WHERE ($r < $p OR $p < $l) AND $rdn = $n";
-            
-            $link->execute($sql);
-            $link->commit();
-
-            $result = TRUE;
-        } catch(\Exception $e) {
-            $link->rollback();
-        }
-
-        return $result;
-    }
-
-    public function moveNode() {
-        
-        if ($this->isRoot()) {
-            $this->addMessage("Can't move root node!");
-            return false;
-        }
-
-        if ( ! $this->root) {
-            $this->addMessage("Root node parameter is required!");
-            return false;
-        }
-
-        if ($this->root->isPhantom()) {
-            $this->addMessage("Can't move node when root node is new!");
-            return false;
-        }
-
-        $link   = $this->getWriteConnection();
-        $table  = $this->getSource();
-
-        $root   = $this->root;
-        $parent = $this->parent ? $this->parent : $root;
-
-        if ($parent->isPhantom()) {
-            $this->addMessage("Can't move node when parent node is new!");
-            return false;
-        }
-
-        // refresh root & parent (get actual data)
-        if ( ! $parent->isRoot()) {
-            // $root->refreshNode();
-            // $parent->refreshNode();  
-        } else {
-            // $parent->refreshNode();
-        }
-        
-       // $this->refreshNode();
-
-        $action = $this->action;
-
-        if ( ! $action) {
-            $action = self::ACTION_MOVE_APPEND;
-        }
-
-        $fieldLeft  = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldRoot  = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
-        $fieldPid   = $this->getParamPid();
-        
-        $position = null;
-        $depth    = null;
-        $domain   = null;
-
-        $leftValue  = $this->getLeftValue();
-        $rightValue = $this->getRightValue();
-        $levelValue = $this->getLevelValue();
-        $rootValue  = $this->getRootValue();
-
-        $pidValue   = $parent->getIdValue();
-
-        if ($parent->isRoot()) {
-            $pidValue = 0;
-        }
-
-        switch($action) {
-            case self::ACTION_MOVE_APPEND:
-                $position = $parent->getRightValue();
-                $depth    = $parent->getLevelValue() - $levelValue + 1;
-                $domain   = $parent->getRootValue();
-                break;
-            case self::ACTION_MOVE_PREPEND:
-                $position = $parent->getLeftValue() + 1;
-                $depth    = $parent->getLevelValue() - $levelValue + 1;
-                $domain   = $parent->getRootValue();
-                break;
-            case self::ACTION_MOVE_BEFORE:
-                $before = $this->before;
-                // $before->refreshNode();
-                
-                $position = $before->getLeftValue();
-                $depth    = $before->getLevelValue() - $levelValue + 0;
-                $domain   = $before->getRootValue();
-                break;
-            case self::ACTION_MOVE_AFTER:
-                $after = $this->after;
-                // $after->refreshNode();
-
-                $position = $after->getRightValue() + 1;
-                $depth    = $after->getLevelValue() - $levelValue + 0;
-                $domain   = $after->getRootValue();
-                break;
-            default:
-                $this->addMessage("Action $action is not supported!");
+            if (this.isphantom(dest)) {
+                this._error(type + "(): destination doesn't exists!");
                 return false;
-        }
-
-        $result = false;
-
-        try {
-            $link->begin();
-
-            $size = $rightValue - $leftValue + 1;
-
-            $sql = sprintf(
-                "UPDATE $table SET $fieldLeft = $fieldLeft %+d 
-                 WHERE $fieldLeft >= $position AND $fieldRoot = $domain",
-                $size
-            );
-
-            $link->execute($sql);
-
-            $sql = sprintf(
-                "UPDATE $table SET $fieldRight = $fieldRight %+d 
-                WHERE $fieldRight >= $position AND $fieldRoot = $domain",
-                $size
-            );
-
-            $link->execute($sql);
-            
-            if ($leftValue >= $position) {
-                $leftValue  += $size;
-                $rightValue += $size;
             }
 
-            $sql = sprintf(
-                "UPDATE $table 
-                 SET 
-                    $fieldLevel = $fieldLevel %+d,
-                    $fieldPid   = $pidValue
-                 WHERE 
-                    $fieldLeft >= $leftValue AND $fieldRight <= $rightValue 
-                    AND $fieldRoot = $domain",
-                $depth
-            );
-            
-            $link->execute($sql);
-
-            $sql = sprintf(
-                "UPDATE $table SET 
-                    $fieldLeft  = $fieldLeft %+d,
-                    $fieldRight = $fieldRight %+d
-                 WHERE 
-                    ($fieldLeft >= $leftValue AND $fieldRight <= $rightValue) 
-                    AND $fieldRoot = $domain",
-                $position - $leftValue,
-                $position - $leftValue 
-            );
-            
-            $link->execute($sql);
-
-            $fixgap = $rightValue + 1;
-
-            $sql = sprintf(
-                "UPDATE $table SET $fieldLeft = $fieldLeft %+d 
-                 WHERE $fieldLeft >= $fixgap AND $fieldRoot = $domain",
-                -$size
-            );
-
-            $link->execute($sql);
-
-            $sql = sprintf(
-                "UPDATE $table SET $fieldRight = $fieldRight %+d 
-                 WHERE $fieldRight >= $fixgap AND $fieldRoot = $domain",
-                -$size
-            );
-
-            $link->execute($sql);
-
-            $link->commit();
-
-            $result = true;
-            
-            // refresh current node
-            
-            $this->refreshNode();
-            
-            // update phantoms props
-            
-        } catch (\Exception $e) {
-            $link->rollback();
-            $this->addMessage($e->getMessage());
-            $result = false;
-        }
-
-        // invalidate operation
-        $this->action = null;
-        $this->root   = null;
-        $this->parent = null;
-        $this->before = null;
-        $this->after  = null;
-
-        return $result;
-    }
-
-    public function getRoot() {
-        $fieldId = $this->getParamId();
-        $fieldRoot  = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
-
-        $params = array();
-
-        $params[$fieldLevel] = 0;
-        $params[$fieldRoot]  = $this->$fieldRoot;
-
-        $fake = new \stdClass();
-        $fake->$fieldId = $this->$fieldRoot;
-        
-        $root = $this->findNode($fake, $params);
-        return $root;
-    }
-
-    public function getParent() {
-
-        $table = $this->getSource();
-        $link = $this->getReadConnection();
-
-        $fieldLeft = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldRoot = $this->getParamRoot();
-        $fieldId = $this->getParamId();
-        
-        $idValue = $this->getIdValue();
-        $rootValue = $this->getRootValue();
-
-        $sql = "SELECT 
-                    p.*
-                FROM 
-                    $table n,
-                    $table p
-                WHERE 
-                    (n.$fieldLeft BETWEEN p.$fieldLeft AND p.$fieldRight) 
-                    AND (n.$fieldId = $idValue)
-                    AND (n.$fieldRoot = $rootValue) 
-                    AND (p.$fieldRoot = $rootValue) 
-                ORDER BY p.$fieldRight - p.$fieldLeft 
-                LIMIT 1, 1";
-
-        $result = new Resultset(NULL, $this, $link->query($sql));
-        $parent = $result->getFirst();
-
-        if ($parent) {
-            $parent->depth = $this->getDepthValue() - 1;
-
-            $parts = explode('/', $this->getPathValue());
-            array_pop($parts);
-            
-            $path = implode('/', $parts);
-            $parent->path = $path;
-        }
-
-        return $parent;
-    }
-
-    public function getAncestors($params = array(), $reverse = false, $excludeRoot = true) {
-        
-        $table = $this->getSource();
-
-        $fieldLeft  = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldId    = $this->getParamId();
-        $fieldRoot  = $this->getParamRoot();
-        $fieldLevel = $this->getParamLevel();
-        
-        $idValue    = $this->getIdValue();
-        $rootValue  = $this->getRootValue();
-
-        // $reverse = true;
-
-        $sql = "SELECT p.*, ".PHP_EOL;
-
-        if ($reverse) {
-            $sql .= "NULL as path, NULL as depth, NULL as pid ".PHP_EOL;
-        } else {
-            $sql .= "@path := TRIM(
-                        LEADING '/' FROM @path := CONCAT_WS('/', @path, p.$fieldId)
-                     ) as path, 
-                     ROUND(
-                        (
-                            LENGTH(@path) - 
-                            LENGTH(REPLACE(@path, '/', ''))
-                        ) / LENGTH('/')
-                     ) as depth, 
-                     IF(
-                         (
-                            @pid := SUBSTRING_INDEX(
-                                REPLACE(CONCAT('/', @path), CONCAT('/', p.$fieldId), ''),
-                                '/',
-                                -1
-                            )
-                         ) = '', 0, @pid
-                    ) as pid".PHP_EOL;
-        }
-
-        $sql .= "FROM 
-                    $table n, 
-                    $table p,
-                    (SELECT @path := '') x,
-                    (SELECT @pid := '') y
-                WHERE 
-                    n.$fieldLeft BETWEEN p.$fieldLeft AND p.$fieldRight 
-                    AND p.$fieldRoot = $rootValue 
-                    AND n.$fieldRoot = $rootValue 
-                    AND n.$fieldId = $idValue 
-                    AND p.$fieldId <> $idValue " . PHP_EOL;
-
-        if ($excludeRoot) {
-            $sql .= "AND p.$fieldLevel <> 0 " . PHP_EOL;
-        }
-
-        if ($reverse) {
-            $sql .= "ORDER BY (p.$fieldRight - p.$fieldLeft)";  
-        } else {
-            $sql .= "ORDER BY p.$fieldLeft";    
-        }
-
-        return $this->_createResult($sql, $params);
-    }
-    
-    public function getDescendants($params = array(), $children = false) {
-
-        $table = $this->getSource();
-
-        $fieldLeft  = $this->getParamLeft();
-        $fieldRight = $this->getParamRight();
-        $fieldRoot  = $this->getParamRoot();
-        $fieldId    = $this->getParamId();
-        $fieldLevel = $this->getParamLevel();
-        
-        $rootValue  = $this->getRootValue();
-        $idValue    = $this->getIdValue();
-        $levelValue = $this->getLevelValue();
-
-        $sql = "SELECT 
-                    n.*,
-                    (COUNT(p.$fieldId) - (st.depth + 1)) as depth,
-                    (GROUP_CONCAT(p.$fieldId ORDER BY p.$fieldLeft SEPARATOR '/')) as path
-                FROM 
-                    $table n,
-                    $table p,
-                    $table sp,
-                    (
-                        SELECT 
-                            xn.*,
-                            (COUNT(xp.$fieldId) - 1) AS depth
-                        FROM
-                            $table xn,
-                            $table xp
-                        WHERE
-                            (xn.$fieldLeft BETWEEN xp.$fieldLeft AND xp.$fieldRight)
-                            AND (xp.$fieldRoot = $rootValue)
-                            AND (xn.$fieldRoot = $rootValue)
-                            AND (xn.$fieldId = $idValue)
-                        GROUP BY xn.$fieldId 
-                        ORDER BY xn.$fieldLeft
-                    ) st 
-                WHERE 
-                    (n.$fieldLeft BETWEEN p.$fieldLeft AND p.$fieldRight) 
-                    AND (n.$fieldLeft BETWEEN sp.$fieldLeft AND sp.$fieldRight) 
-                    AND (n.$fieldRoot = $rootValue) 
-                    AND (p.$fieldRoot = $rootValue) 
-                    AND (n.$fieldLevel > $levelValue)
-                    AND (sp.$fieldRoot = $rootValue)
-                    AND (sp.$fieldId = st.$fieldId) 
-                GROUP BY n.$fieldId ";
-                
-        if ($children) {
-            $sql .= " HAVING depth <= 1 ";
-        }
-
-        $sql .= " ORDER BY n.$fieldLeft ";
-
-        return $this->_createResult($sql, $params);
-    }
-
-    public function getChildren($params = array()) {
-        return $this->getDescendants($params, true);
-    }
-
-    public function getSiblings($params = array()) {
-        $parent = $this->getParent();
-        if ($parent) {
-            $params = array();
-            $column = $this->getParamId();
-            $params[$column] = array('<>', $this->getIdValue());
-            return $parent->getChildren($params);
-        }
-        return false;
-    }
-
-    public function getPrevious() {
-        $params = array();
-        $column = $this->getParamRight();
-        $params[$column] = $this->getLeftValue() - 1;
-        return $this->findNode(self::_findRoot($this), $params);
-    }
-
-    public function getNext() {
-        $params = array();
-        $column = $this->getParamLeft();
-        $params[$column] = $this->getRightValue() + 1;
-        return $this->findNode(self::_findRoot($this), $params);
-    }
-
-    public function addMessage($message) {
-        $this->appendMessage(new Message($message));
-    }
-
-    /**
-     * Refresh node (re-quering)
-     *
-     * @return [type] [description]
-     */
-    public function refreshNode() {
-        if ( ! $this->isPhantom()) {
-
-            $fieldId = $this->getParamId();
-            $fieldRoot = $this->getParamRoot();
-
-            $root = self::_findRoot($this);
-
-            $params = array();
-            $params[$fieldRoot] = $root->$fieldId;
-            $params[$fieldId] = $this->$fieldId;
-            
-            $node = self::findNode($root, $params);
-            $meta = $node->getModelsMetadata();
-
-            foreach($node as $key => $val) {
-                if ($meta->hasAttribute($node, $key) || in_array($key, array("depth", "path", "pid"))) {
-                    $this->$key = $val; 
-                }
+            if (dest[fields.id] == data[fields.id]) {
+                this._error(type + "(): can't move to itself!");
+                return false;
             }
-        }
 
-        return $this;
-    }
-
-    public function nodify($excludeRoot = true) {
-        if ( ! isset($this->path) || empty($this->path)) {
-            
-            $fieldId = $this->getParamId();
-            $fieldRoot = $this->getParamRoot();
-
-            $root = new \stdClass();
-            $root->$fieldId = $this->$fieldRoot;
-
-            $params = array();
-            $params[$fieldId] = $this->getIdValue();
-
-            $node = $this->findNode($root, $params);
-
-            foreach($node as $key => $val) {
-                $this->$key = $val;
+            if (this.isdescendant(data, dest)) {
+                this._error(type + "(): can't move to descendant!");
+                return false;
             }
-        }
-        return $this;
-    }
 
-    public function compileTemplate($template) {
-        $node = $this;
-        $compiled = preg_replace_callback(
-            '/\{(\w+)\}/', 
-            function($matches) use ($node) {
-                $field = $matches[1];
-                return $node->$field;
-            }, 
-            $template
-        );
-        return $compiled;
-    }
-
-    public static function findRoots($params = array(), $autoCreate = true) {
-        $base = self::_getInstance();
-
-        $params = empty($params) ? array() : $params;
-        $params[$base->getParamLevel()] = 0;
-
-        $roots = self::find(self::params($params));
-        $rootss = array();
-        foreach($roots as $k => $root) {
-            if ($root) {
-                $root->depth = 0;
-                $root->path = $root->getIdValue();
-            } else {
-                if ($autoCreate) {
-                    $root = new static();    
-                    if ( ! $root->createRoot($params)) {
+            switch(type) {
+                case 'before':
+                    if (
+                        this.index(dest) - this.descendants(data).length - 1 == this.index(data) && 
+                        data[fields.level] == dest[fields.level] && 
+                        ! this.isphantom(data)
+                    ){
+                        this._error("before(): nothing to move!");
                         return false;
                     }
+                break;
+
+                case 'after':
+                    if (
+                        this.index(dest) + this.descendants(dest).length + 1 == this.index(data) && 
+                        data[fields.level] == dest[fields.level] && 
+                        ! this.isphantom(data)
+                    ){
+                        this._error("after(): nothing to move!");
+                        return false;
+                    }
+
+                break;
+
+                case 'append':
+                    var child = dest._child || [];
+
+                    if (child[child.length - 1] == data[fields.id] && ! this.isphantom(data)) {
+                        this._error("append(): nothing to move!");
+                        return false;
+                    }
+
+                    if ( ! this.isexpanded(dest)) {
+                        this._error("append(): can't append to collapsed data!");
+                        return false; 
+                    }
+                break;
+            }
+
+            return true;
+        },
+        /** @private */
+        _detach: function(data, descs) {
+            var 
+                fields = this.options.fields,
+                offset = this.index(data),
+                size = descs.length;
+
+            if (offset > -1) {
+                data._origin = null;
+                var 
+                    owner = data._parent || null, 
+                    regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
+                    retrm = new RegExp('^/');
+                    level = +data[fields.level];
+
+                if (owner) {
+                    owner._child = owner._child || [];
+                    var cindex = indexof(owner._child, data[fields.id]);
+                    if (cindex > -1) {
+                        owner._child.splice(cindex, 1);
+                        if ( ! owner._child.length) {
+                            owner[fields.leaf] = '1';
+                        }
+                    }
+                    data._origin = owner;
                 } else {
-                    return false;
+                    var prev = this.prev(data);
+                    if (prev) data._origin = prev; 
+                }
+
+                this._data.splice(offset, 1);
+                delete this._indexes[data[fields.id]];
+
+                data._parent = null;
+                data._root   = null;
+
+                data[fields.level] = 0;
+                data[fields.path]  = data[fields.path].replace(regex, '').replace(retrm, '');
+
+                if (size) {
+                    this._data.splice(offset, size);
+                    for (var i = 0; i < size; i++) {
+                        descs[i]._root = null;
+                        
+                        descs[i][fields.path]  = descs[i][fields.path].replace(regex, '').replace(retrm, '');
+                        descs[i][fields.level] = +descs[i][fields.level] - level;
+
+                        delete this._indexes[descs[i][fields.id]];
+                    }
+                }
+
+                regex = null;
+                retrm = null;
+
+                this._reindex(offset);
+            }
+        },
+        /** @private */
+        _attach: function(data, descs, type, dest) {
+            var 
+                fields = this.options.fields,
+                dsize = descs.length,
+                offset = -1,
+                prefix = '',
+                bindex = 0,
+                level = 0,
+                owner = null,
+                root = null,
+                pos = 0,
+                i;
+
+            // define offset
+            switch(type) {
+                case 'after':
+                    offset = this.index(dest);
+                    level = +dest[fields.level];
+                    owner = dest._parent;
+                    root = dest._root;
+                    pos = +dest[fields.left] + this.size(dest);
+
+                    if (owner) {
+                        prefix = owner[fields.path] + '/';
+                        bindex = this.index(owner);
+                    } else {
+                        bindex = offset;
+                    }
+
+                    offset += this.descendants(dest).length + 1;
+
+                    break;
+
+                case 'before':
+                    offset = this.index(dest);
+                    level = +dest[fields.level];
+                    owner = dest._parent;
+                    root = dest._root;
+                    pos = +dest[fields.left];
+
+                    if (owner) {
+                        prefix = owner[fields.path] + '/';
+                        bindex = this.index(owner);
+                    }
+
+                    break;
+
+                case 'append':
+                    prefix = dest[fields.path] + '/';
+                    offset = this.index(dest);
+                    level = +dest[fields.level] + 1;
+                    root = dest._root;
+                    pos = +dest[fields.right];
+
+                    bindex = offset;
+                    offset += this.descendants(dest).length + 1;
+
+                    if (dest[fields.leaf] == '1') {
+                        dest[fields.leaf] = '0';
+                    }
+
+                    break;
+            }
+
+            if (offset > -1) {
+
+                this._data.splice(offset, 0, data);
+
+                data._root = root;
+                data[fields.level] = level;
+                data[fields.path] = prefix + data[fields.path];
+
+                if (dsize) {
+                    Array.prototype.splice.apply(this._data, [(offset + 1), 0].concat(descs));
+                    for (i = 0; i < dsize; i++) {
+                        descs[i][fields.level] = +descs[i][fields.level] + level;
+                        descs[i][fields.path]  = prefix + descs[i][fields.path];
+                    }
+                }
+                
+                this._reindex(offset);
+
+                var origin, oidx;
+
+                if ((origin = data._origin)) {
+                    oidx = this.index(origin);
+                    if (oidx < bindex) bindex = oidx;
+                    delete data._origin;
+                }
+
+                // update like SQL
+                var 
+                    p = pos,
+                    l = +data[fields.left],
+                    r = +data[fields.right],
+                    j = this._data.length,
+                    d,
+                    x,
+                    y;
+
+                for (i = 0; i < j; i++) {
+                    d = this._data[i];
+
+                    x = +d[fields.left];
+                    y = +d[fields.right];
+
+                    if (r < p || p < l) {
+
+                        if (p > r) {
+                            if (r < x && x < p) {
+                                x += l - r - 1;
+                            } else if (l <= x && x < r) {
+                                x += p - r - 1;
+                            } else {
+                                x += 0;
+                            }
+
+                            if (r < y && y < p) {
+                                y += l - r - 1;
+                            } else if (l < y && y <= r) {
+                                y += p - r - 1;
+                            } else {
+                                y += 0;
+                            }
+                        } else {
+                            if (p <= x && x < l) {
+                                x += r - l + 1;
+                            } else if (l <= x && x < r) {
+                                x += p - l;
+                            } else {
+                                x += 0;
+                            }
+
+                            if (p <= y && y < l) {
+                                y += r - l + 1;
+                            } else if (l < y && y <= r) {
+                                y += p - l;
+                            } else {
+                                y += 0;
+                            }
+                        }
+
+                        d[fields.left]  = x;
+                        d[fields.right] = y;
+
+                    }
+
+                    if (i >= bindex) {
+                        // reset child but keep parent
+                        if (d._parent) {
+                            d._parent._child = [];
+                        }    
+                    }
+
+                }
+                // rebuild...
+                this._rebuild(bindex);
+            }
+        },
+        _insert: function(data, type, dest) {
+            var fields = this.options.fields;
+            var level, index, child, chpos, pos, d;
+
+            switch(type) {
+                case 'append':
+                    data._last   = true;
+                    data._root   = dest._root;
+                    data._parent = dest;
+
+                    dest[fields.leaf] = 0;
+                    data[fields.path] = dest[fields.path] + '/' + data[fields.id];
+                    data[fields.level] = +dest[fields.level] + 1;
+
+                    dest._child = dest._child || [];
+
+                    if (dest._child.length) {
+                        index = this.index(this.get(dest._child[dest._child.length - 1])) + 1;
+                    } else {
+                        index = this.index(dest) + 1;
+                    }
+
+                    dest._child.push(data);
+                    pos = +dest[fields.right];
+                    
+                    break;
+                case 'before':
+
+                    data[fields.left] = dest[fields.left];
+                    data[fields.right] = dest[fields.right];
+                    data[fields.level] = dest[fields.level];
+
+                    data._last = false;
+                    data._root = dest._root;
+                    data._parent = dest._parent;
+
+                    index = this.index(dest);
+                    pos   = this.left(dest);
+
+                    if (data._parent) {
+                        child  = data._parent._child || [];
+                        chpos = indexof(child, dest[fields.id]);
+                        chpos = chpos < -1 ? 0 : chpos;
+                        child.splice(chpos, 0, data);
+
+                        data[fields.path] = data._parent[fields.path] + '/' + data[fields.id];
+                    } else {
+                        data[fields.path] = data[fields.id];
+                    }
+
+                    break;
+                case 'after':
+                    break;
+            }
+
+            // create new space for subtree
+            for (var i = 0, ii = this._data.length; i < ii; i++) {
+                d = this._data[i];
+                if (d[fields.left] >= pos) {
+                    d[fields.left] = +d[fields.left] + 2;
+                }
+                if (d[fields.right] >= pos) {
+                    d[fields.right] = +d[fields.right] + 2;
                 }
             }
-            $rootss[] = $root->toArray();
-        }
-        return $rootss;
-    }
 
-    public static function findRoot($params = array(), $autoCreate = true) {
-        $base = self::_getInstance();
-        $params[$base->getParamLevel()] = 0;
-        $root = self::findFirst(self::params($params));
-        
-        if ($root) {
-            $root->depth = 0;
-            $root->path = $root->getIdValue();
-        } else {
-            if ($autoCreate) {
-                $root = new static();   
-                if ( ! $root->createRoot($params)) {
-                    return false;
+            data[fields.left]  = pos;
+            data[fields.right] = pos + 1;
+
+            data._metachanged = true;
+
+            this._data.splice(index, 0, data);
+
+            this._reindex();
+            this._rebuild(); // TODO: check offset...
+
+        },
+        /** @private */
+        _startEdit: function(node) {
+            var 
+                data = this._data[this._indexes[node.attr('data-id')]],
+                fields = this.options.fields,
+                holder = node.find('.bt-text'),
+                text = data[fields.text];
+
+            // remove query hightlight
+            if (data._orig && data._orig.text) {
+                text = data._orig.text;
+            }
+
+            // drop previous editing
+            this._stopEdit(true);
+
+            // ensure selection
+            this.select(node);
+
+            // place editor
+            this.editor.appendTo(holder);
+            this.edtext.val(text).focus();
+
+            // defer text select
+            var defer = $.debounce(1, function(){
+                seltext(this.edtext, text.length);
+            });
+
+            defer.call(this);
+        },
+        /** @private */
+        _stopEdit: function(deselect) {
+            var 
+                fields = this.options.fields,
+                node = this.editor.closest('.bt-node');
+                
+            if (node.length) {
+                var 
+                    data = this._data[this._indexes[node.attr('data-id')]],
+                    text = this.edtext.val(),
+                    orig = data[fields.text],
+                    disp = text;
+
+                if (data._orig && data._orig.text) {
+                    orig = data._orig.text;
+                    disp = data._orig.disp;
+                }
+
+                data[fields.text] = disp;
+                deselect = deselect === undef ? true : deselect;
+                
+                if (deselect) {
+                    this.deselect(node);
+                    // remove editor
+                    this.editor.detach();
+                    node.find('.bt-text').html(disp);
+                }
+
+                if (text != orig) {
+                    this._fireEvent('edit', data, text);
                 }
             } else {
+                // manual deselect...
+                this._selected = null;
+                this.grid.find('.bt-selected').removeClass('bt-selected');
+            }
+        },
+        /** @private */
+        _fireEvent: function() {
+            var args = $.makeArray(arguments),
+                name = (args.shift()) + '.bt';
+            this.element.trigger(name, args);
+        },
+        hasScroll: function() {
+            return this.element[0].scrollHeight > this.element.height();
+        },
+        load: function(data, render) {
+            var 
+                fields = this.options.fields,
+                start = this._data.length,
+                stop;
+
+            this._data.push.apply(this._data, (data || []));
+            stop = this._data.length;
+
+            this._reindex(start, stop);
+            this._rebuild(start, stop);
+
+            render = render === undef ? false : render;
+            render && this.render();
+        },
+        render: function() {
+            var 
+                buff = this.options.buffer * this.options.itemSize,
+                spix = this.grid.scrollTop() - this.grid.position().top - buff,
+                epix = spix + this.element.height() + buff * 2,
+                data = $.grep(this._data, function(d){ return !d._hidden; });
+            
+            spix = spix < 0 ? 0 : spix;
+
+            var 
+                begidx = Math.floor(spix / this.options.itemSize),
+                endidx = Math.ceil(epix / this.options.itemSize),
+                padtop = this.options.itemSize * begidx,
+                padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
+
+            this.grid.css({
+                paddingTop: padtop,
+                paddingBottom: padbtm
+            });
+
+            // this.tickStart('render');
+            this._renderRange(data, begidx, endidx);
+            // this.tickStop('render');
+        },
+        scroll: function(data) {
+            var 
+                options = this.options,
+                stacks  = $.grep(this._data, function(d){ return ! d._hidden; }),
+                scroll  = indexof(stacks, data) * options.itemSize,
+                element = this.element;
+
+            element.animate({scrollTop: scroll}, scroll);
+        },
+        visible: function() {
+            return this._visible;
+        },
+        create: function(spec) {
+            if ( ! spec) {
+                this._error("create(): spec doesn't meet requirement!");
                 return false;
             }
-        }
-        return $root;
-    }
 
-    public static function findNodes($root, $params = array(), $excludeRoot = true) {
-        $qry = self::_createQuery($root, $excludeRoot);
-        $sql = "$qry->select $qry->where $qry->group $qry->order";
-        return self::_createResult($sql, $params);
-    }
+            // setup structure
+            var fields = this.options.fields,
+                guid = this._guid(),
+                prop,
+                key;
 
-    public static function findNodesIn($ids) {
-        $base = self::_getInstance();
-        $link = $base->getReadConnection();
-        $fieldId = $base->getParamId();
-        $fieldRoot = $base->getParamRoot();
+            for (prop in fields) {
+                key = fields[prop];
+                if (spec[key] === undef) {
+                    switch(prop) {
+                        case 'id':
+                            spec[key] = guid;
+                            break;
+                        case 'leaf':
+                        case 'expand':
+                            spec[key] = 1;
+                            break;
+                        default:
+                            spec[key] = '';
+                    }
+                }
+            }
 
-        // how to find root? sampling
-        $sample = self::_findFirst($ids[0], $fieldRoot);
-        
-        if ($sample) {
-            $root = new \stdClass();
-            $root->$fieldId = $sample[$fieldRoot];
-
-            $qry = self::_createQuery($root);
-
-            $sql  = "$qry->select $qry->where ";
-            $sql .= " AND n.$fieldId IN (".implode(",", $ids).") ";
-            $sql .= "$qry->group $qry->order";
-
-            return new Resultset(NULL, $base, $link->query($sql));
-        }
-
-        return new Resultset(null, $base, []);
-    }
-
-    public static function findNode($root, $params = array()) {
-        $base = self::_getInstance();
-        $link = $base->getReadConnection();
-        $var  = self::_createParams($params);
-        $qry  = self::_createQuery($root, false);
-
-        $sql  = "$qry->select $qry->where ";
-
-        if ( ! empty($var['conditions'])) {
-            $sql .= " AND ".$var['conditions']." ";
-        }
+            // setup metadata
+            spec._hidden = false;
             
-        $sql .= "$qry->group $qry->order LIMIT 0, 1";
+            var 
+                owner = this.selection(),
+                first = this.first(),
+                result = true;
 
-        $nodes = new Resultset(NULL, $base, $link->query($sql, $var['bind']));
-        return $nodes->getFirst();
-    }
+            if (owner) {
+                result = this.append(owner, spec);
+            } else if (first) {
+                result = this.before(first, spec);
+            } else {
+                spec[fields.left]  = 1;
+                spec[fields.right] = 2;
+                spec._root = null;
+                spec._parent = null;
+                spec._last = true;
 
-    public static function findNodeById($id) {
-        $base = self::_getInstance();
-        $fieldId = $base->getParamId();
-        $fieldRoot = $base->getParamRoot();
+                this._data.unshift(spec);
 
-        // how to find his root?
-        $model = self::_findFirst($id, $fieldRoot);
+                this._reindex();
+                this._rebuild();
+                this.render();
 
-        if ($model) {
-            $root = new \stdClass();
-            $root->$fieldId = $model[$fieldRoot];
+                render = true;
+                result = true;
+            }
 
-            $params = array();
-            $params[$fieldId] = $id;
-            return self::findNode($root, $params);
-        }
-        return NULL;
-    }
+            this._debug();
+            return result;
+        },
+        remove: function(data, cascade) {
+            if (data) {
+                var
+                    fields = this.options.fields,
+                    offset = this.index(data),
+                    node = this.nodeof(data);
 
-    public static function findTree(Model $root) {
-        return new QueryNode($root);
-    }
+                cascade = cascade === undef ? true : cascade;
 
-    /**
-     * Compat 'findTree'
-     */
-    public static function fetchTree(Model $root) {
-        return self::findTree($root);
-    }
+                if (cascade) {
+                    var 
+                        removed = this.descendants(data), 
+                        owner = data._parent,
+                        prev = this.prev(data),
+                        size,
+                        key;
 
-    public static function findInvalidNodes(Model $root) {
-        $base = self::_getInstance();
+                    removed.unshift(data);
+                    size = removed.length;
 
-        $table     = $base->getSource();
-        $fieldId   = $base->getParamId();
-        $fieldLeft = $base->getParamLeft();
-        $fieldRoot = $base->getParamRoot();
+                    for (var i = 0; i < size; i++) 
+                        delete this._indexes[removed[i][fields.id]];
 
-        $rootValue = $root->$fieldId;
+                    this._data.splice(offset, size);
+                    this._reindex(offset);
 
-        $sqlInner = "SELECT MAX($fieldId) AS max_id, $fieldLeft
-                     FROM $table
-                     WHERE $fieldRoot = $rootValue
-                     GROUP BY $fieldLeft";
+                    if (owner) {
+                        owner._child = owner._child || [];
+                        var chpos = indexof(owner._child, data[fields.id]);
+                        if (chpos > -1) {
+                            owner._child.splice(chpos, 1);
+                            if ( ! owner._child.length) {
+                                owner[fields.leaf] = '1';
+                            }
+                        }
+                        this._rebuild(this.index(owner));
+                    } else {
+                        if (prev) {
+                            this._rebuild(this.index(prev));
+                        } else {
+                            this._rebuild(offset);    
+                        }
+                    }
 
-        $sqlOuter = "SELECT a.* 
-                     FROM $table a 
-                     LEFT JOIN ($sqlInner) b ON (a.$fieldId = b.max_id AND a.$fieldLeft = b.$fieldLeft) 
-                     WHERE a.$fieldRoot = $rootValue AND b.max_id IS NULL";
-
-        return self::_createResult($sqlOuter);
-    }
-
-    public static function relocateInvalidNodes(Model $root, $callback = null) {
-
-        $invalid  = self::findInvalidNodes($root);
-        $affected = 0;
-
-        if ($invalid->count() > 0) {
-            $fieldLeft  = $root->getParamLeft();
-            $fieldRight = $root->getParamRight();
-
-            foreach($invalid as $node) {
-
-                $node->delete();
-
-                $raw = $node->toArray();
-                unset($raw[$fieldLeft], $raw[$fieldRight]);
-
-                $new = new static();
-
-                foreach($raw as $key => $val) {
-                    $new->$key = $val;
+                    if (node.length) this.render();
+                }
+                return true;
+            }
+            return false;
+        },
+        update: function(data, spec) {
+            data = data || {};
+            spec = spec || {};
+        },
+        append: function(owner, data) {
+            if (this._isvalid(data, 'append', owner)) {
+                var node = this.nodeof(owner), desc;
+                if (this.isphantom(data)) {
+                    this._insert(data, 'append', owner);
+                } else {
+                    desc = this.descendants(data);
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'append', owner);
+                }
+                if (node.length) this.render();
+                return true;
+            }
+            return false;
+        },
+        before: function(next, data) {
+            if (this._isvalid(data, 'before', next)) {
+                var node = this.nodeof(next), desc;
+                if (this.isphantom(data)) {
+                    this._insert(data, 'before', next);
+                } else {
+                    desc = this.descendants(data);
+                    this._detach(data, desc);
+                    this._attach(data, desc, 'before', next);
                 }
 
-                if ($new->prependTo($root)) {
-                    $affected++;
+                if (node.length) this.render();
+                return true;
+            }
+            return false;
+        },
+        after: function(prev, data) {
+            if (this._isvalid(data, 'after', prev)) {
+                var 
+                    desc = this.descendants(data),
+                    node = this.nodeof(prev);
 
-                    if (is_callable($callback)) {
-                        call_user_func_array($callback, array($new));
+                this._detach(data, desc);
+                this._attach(data, desc, 'after', prev);
+
+                if (node.length) this.render();
+                return true;
+            }
+            return false;
+        },
+        get: function(key) {
+            var index = this._indexes[key];
+            return this._data[index] || null;
+        },
+        data: function(index) {
+            return index !== undef ? this._data[index] : this._data;
+        },
+        index: function(data) {
+            if (data) {
+                var key = data[this.options.fields.id],
+                    idx = this._indexes[key];
+                return idx === undef ? -1 : idx;
+            }
+            return -1;
+        },
+        size: function(data) {
+            return this.right(data) - this.left(data) + 1;
+        },
+        level: function(data) {
+            return +data[this.options.fields.level];
+        },
+        left: function(data) {
+            return +data[this.options.fields.left];
+        },
+        right: function(data) {
+            return +data[this.options.fields.right];
+        },
+        isphantom: function(data) {
+            return this.index(data) === -1;
+        },
+        isleaf: function(data) {
+            return this.right(data) - this.left(data) === 1;
+        },
+        isparent: function(data) {
+            return ! this.isleaf(data);
+        },
+        isancestor: function(data, target) {
+            return this.left(data) > this.left(target) && this.right(data) < this.right(target);
+        },
+        isdescendant: function(data, target) {
+            return this.left(target) > this.left(data) && this.right(target) < this.right(data);
+        },
+        isexpanded: function(data) {
+            return +data[this.options.fields.expand] === 1;
+        },
+        iscollapsed: function(data) {
+            return ! this.isexpanded(data);
+        },
+        isvisible: function(data) {
+            var stacks = this.visible();
+            return indexof(stacks, data) > -1;
+        },
+        first: function() {
+            return this._data[0];
+        },
+        last: function() {
+            return this._data[this._data.length - 1];
+        },
+        parent: function(data) {
+            return data._parent;
+        },
+        prev: function(data) {
+            var 
+                fields = this.options.fields,
+                owner = data._parent,
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) - 1]];
+                found = this.data(index);
+            } else {
+                var prev, plvl, dlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                prev  = this._data[--index];
+
+                while(prev && (plvl = +prev[fields.level]) >= dlvl) {
+                    if (plvl === dlvl) {
+                        found = prev;
+                        break;
                     }
+                    prev  = this._data[--index];
+                }
+            }
+
+            return found || null;
+        },
+        next: function(data) {
+            var 
+                fields = this.options.fields, 
+                owner = data._parent, 
+                found = null,
+                index;
+
+            if (owner) {
+                var child = owner._child || [];
+                index = this._indexes[child[indexof(child, data[fields.id]) + 1]];
+                found = this.data(index);
+            } else {
+                var next, dlvl, nlvl;
+
+                index = this.index(data);
+                dlvl  = this.level(data);
+                next  = this._data[++index];
+
+                while(next && (nlvl = +next[fields.level]) >= dlvl) {
+                    if (nlvl === dlvl) {
+                        found = next;
+                        break;
+                    }
+                    next  = this._data[++index];
+                }
+            }
+            return found;
+        },
+        descendants: function(data) {
+            var 
+                fields = this.options.fields,
+                start = this._indexes[data[fields.id]],
+                next = this._data[++start],
+                desc = [],
+                rgt = +data[fields.right];
+
+            while(next) {
+                if (+next[fields.right] >= rgt) 
+                    break;
+                desc.push(next);
+                next = this._data[++start];
+            }
+            return desc;
+        },
+        children: function(data) {
+            var 
+                child = data._child || [],
+                len = child.length,
+                arr = [];
+
+            for (var i = 0; i < len; i++) {
+                var idx = this._indexes[child[i]],
+                    row = this._data[idx];
+                if (row) {
+                    arr.push(row);
+                }
+            }
+
+            return arr;
+        },
+        createNode: function(data) {
+            return $($.templates.btnode(data));
+        },
+        nodeof: function(data) {
+            return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
+        },
+        movedNode: function() {
+            return this.grid.children('.ui-sortable-helper');
+        },
+        visibleNodes: function() {
+            return this.grid.children('.bt-node:not(.ui-sortable-placeholder)');
+        },
+        removableNodes: function() {
+            return this.grid.children().not('.ui-sortable-helper,.ui-sortable-placeholder');
+        },
+        selectedNode: function() {
+            var node = $({});
+            if (this._selected) {
+                node = this.grid.children('.bt-node[data-id=' + this._selected + ']');
+            }
+            return node.length ? node : null;
+        },
+        dataof: function(node) {
+            var key = node.attr('data-id');
+            return this._data[this._indexes[key]];
+        },
+        cascade: function(data, handler, scope) {
+            var desc = this.descendants(data) || [];
+            desc.unshift(data);
+            scope = scope || this;
+            $.each(desc, function(i, d){
+                $.proxy(handler, scope, d)();
+            });
+        },
+        expand: function(data) {
+            var 
+                fields = this.options.fields,
+                fshow = function(data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = false;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fshow.call(this, ds[i]);
+                        }
+                    }    
+                };
+
+            data[fields.expand] = '1';
+            data._metachanged = true;
+
+            fshow.call(this, data);
+
+            this._fireEvent('expand', data);
+            this.render();
+        },
+        collapse: function(data) {
+            var 
+                fields = this.options.fields,
+                fhide = function(data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = true;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fhide.call(this, ds[i]);
+                        }
+                    }     
+                };
+
+            data[fields.expand] = '0'; 
+            data._metachanged = true;
+
+            fhide.call(this, data);
+
+            this._fireEvent('collapse', data);
+            this.render();
+        },
+        toggle: function(node, silent, force) {
+            var expander = node.find('.elbow-expander');
+            silent = silent === undef ? true : silent;
+            if (expander.length) {
+                if (silent) {
+                    // just update style
+                    var state = expander.hasClass('elbow-plus') ? 'elbow-minus' : 'elbow-plus';
+                    if (force !== undef) {
+                        state = force == 'expand' ? 'elbow-minus' : 'elbow-plus';
+                    }
+                    expander.removeClass('elbow-plus elbow-minus').addClass(state); 
+                } else {
+                    // perform expand/collapse
+                }
+            }
+        },
+        select: function(node, single) {
+            single = single === undef ? true : single;
+            if (single) this.deselectAll();
+
+            this._selected = node.attr('data-id');
+            node.addClass('bt-selected');
+        },
+        deselect: function(node) {
+            this._selected = null;
+            node.removeClass('bt-selected');
+        },
+        deselectAll: function() {
+            this._selected = null;
+            this.grid.children('.bt-selected').removeClass('bt-selected');
+            this.editor.detach();
+        },
+        selection: function() {
+            var node = this.grid.children('.bt-selected');
+            return node.length ? this._data[this._indexes[this._selected]] : null;
+        },
+        query: function(query) {
+
+            var 
+                fields = this.options.fields,
+                regex = new RegExp('('+query+')', 'igm'),
+                size = this._data.length,
+                text,
+                data,
+                disp,
+                i;
+
+            for (i = 0; i < size; i++) {
+
+                data  = this._data[i];
+
+                // reset first
+                if (data._orig) {
+                    data._hidden = data._orig.hidden;
                     
+                    data[fields.expand] = data._orig.expand;
+                    data[fields.text] = data._orig.text;
+
+                    delete data._orig;
                 }
 
-            }
+                if (query) {
+                    text = data[fields.text];
 
-        }
+                    data._orig = {
+                        hidden: data._hidden,
+                        expand: data[fields.expand],
+                        text: text
+                    };
 
-        return $affected;
-    }
-    
-    public static function makeTree(Resultset $nodes) {
-        $tree = array();
-        $size = 0;
+                    var found = regex.exec(text);
 
-        if ($nodes->count() > 0) {
-            
-            $stack = array();
-            
-            foreach($nodes as $node) {
-                $item = $node->toArray();
-                $item['children'] = array();
+                    data._hidden = true;
 
-                $size = count($stack);
+                    if (found) {
 
-                while($size > 0 AND $stack[$size - 1]['depth'] >= $item['depth']) {
-                    array_pop($stack);
-                    $size--;
-                }
+                        disp = data[fields.text].replace(
+                            found[1], 
+                            '<span class="bt-hightlight">'+found[1]+'</span>'
+                        );
 
-                if ($node->isLeaf()) {
-                    unset($item['children']);
-                }
+                        data._hidden = false;
+                        data._orig.disp = disp;
+                        data[fields.text] = disp;
 
-                if ($size == 0) {
-                    $n = count($tree);
-                    $tree[$n] = $item;
-                    $stack[] =& $tree[$n];
-                } else {
-                    $n = count($stack[$size - 1]['children']);
-                    $stack[$size - 1]['children'][$n] = $item;
-                    $stack[] =& $stack[$size - 1]['children'][$n];
-                }
+                        var pdat = data._parent;
 
-            }
-
-        }
-        return $tree;
-    }
-
-    public static function plotTree(Resultset $nodes, $template = null) {
-        $list = '';
-
-        if (empty($template)) {
-            $base = self::_getInstance();
-            $template = '<span>Node - {' . $base->getParamId() . '}</span>';
-        }
-
-        if ($nodes->count() > 0) {
-
-            $first = $nodes->getFirst();
-            $currDepth = $first->getDepthValue();
-            $delta = $currDepth - 0;
-
-            $counter = 0;
-            $list = '<ul>';
-
-            foreach($nodes as $node) {
-                $nodeDepth = $node->depth;
-
-                if ($nodeDepth == $currDepth) {
-                    if ($counter > 0) {
-                        $list .= '</li>';
+                        while(pdat) {
+                            if (pdat._hidden) {
+                                pdat._hidden = false;
+                            }
+                            pdat[fields.expand] = '1';
+                            pdat = pdat._parent;
+                        }
                     }
-                } else if ($nodeDepth > $currDepth) {
-                    $list .= '<ul>';
-                    $currDepth = $currDepth + ($nodeDepth - $currDepth);
-                } else if ($nodeDepth < $currDepth) {
-                    $list .= str_repeat('</li></ul>', $currDepth - $nodeDepth) . '</li>';
-                    $currDepth = $currDepth - ($currDepth - $nodeDepth);
                 }
 
-                $content = '';
-
-                if (is_callable($template)) {
-                    $content = call_user_func_array($template, array($node));
-                } else {
-                    $content = $node->compileTemplate($template);
-                }
-
-                $list .= '<li>' . $content;
-                ++$counter;
             }
-            $list .= str_repeat('</li></ul>', $nodeDepth - $delta).'</li>';
-            $list .= '</ul>';
+
+            regex = null;
+            this.render();
+        },
+        swap: function(from, to, reindex) {
+            var size = this._data.length, tmp, i;
+            if (from != to && from >= 0 && from <= size && to >= 0 && to <= size) {
+                tmp = this._data[from];
+                if (from < to) {
+                    for (i = from; i < to; i++) {
+                        this._data[i] = this._data[i+1];
+                    }
+                } else {
+                    for (i = from; i > to; i--) {
+                        this._data[i] = this._data[i-1];
+                    }
+                }
+
+                this._data[to] = tmp;
+
+                reindex = reindex === undef ? true : reindex;
+                if (reindex) this._reindex();
+            }
+        },
+        instance: function() {
+            return this;
+        },
+        tickStart: function(name) {
+            this.markers = this.markers || {};
+            name = name === undef ? '_' : name;
+            this.markers[name] = new Date();
+        },
+        tickStop: function(name) {
+            this.markers = this.markers || {};
+            name = name === undef ? '_' : name;
+            if (this.markers[name] !== undef) {
+                var elapsed = ((new Date() - this.markers[name]) / 1000) + 'ms';
+                console.log(name + ': ' + elapsed);
+            }
+        },
+        _onScroll: function(e) {
+            var 
+                options = this.options,
+                currtop = this.element.scrollTop(),
+                currdir = currtop > this._scrolltop ? 'down' : 'up',
+                buffzone;
+
+            if (this._scrolldir != currdir) {
+                this._scrolldif = 0;
+            } else {
+                this._scrolldif = this._scrolldif + Math.abs(currtop - this._scrolltop);
+            }
+
+            buffzone = (options.buffer * options.itemSize - this._buffedge);
+            
+            if (this._scrolldif === 0 || this._scrolldif >= buffzone) {
+                this._scrolldif = 0;
+                this.render();
+            }
+
+            this._scrolltop = currtop;
+            this._scrolldir = currdir;
+        },
+        _onExpanderClick: function(e) {
+            e.stopPropagation();
+            var 
+                node = $(e.currentTarget).closest('.bt-node'),
+                data = this.get(node.attr('data-id'));
+
+            if (data) {
+                if (this.isexpanded(data)) {
+                    this.collapse(data);
+                } else {
+                    this.expand(data);
+                }
+            }
+        },
+        _onNavigate: function(e) {
+            var code = e.keyCode || e.which;
+            if (code == 9 || code == 38 || code == 40) {
+                var 
+                    node = this.grid.find('.bt-selected'),
+                    next,
+                    prev;
+
+                e.preventDefault();
+
+                if (node.length) {
+
+                    switch(code) {
+                        // tab
+                        case 9:
+                            var method = e.shiftKey ? 'prev' : 'next',
+                                target = node[method].call(node);
+                            if (target.length) this._startEdit(target);
+                            break;
+                        // up
+                        case 38:
+                            prev = node.prev('.bt-node');
+                            if (prev.length) this._startEdit(prev);
+                            break;
+                        // down
+                        case 40:
+                            next = node.next('.bt-node');
+                            if (next.length) this._startEdit(next);
+                            break;
+
+                    }    
+                }
+            }
+        },
+        _onBeforeDrag: function(e, ui) {
+            var 
+                fields = this.options.fields,
+                node = ui.item,
+                data = this.dataof(node);
+
+            this.deselectAll();
+            this.select(node);
+
+            node.addClass('bt-moving');
+
+            if (data) {
+                var 
+                    isexpand = +data[fields.expand] === 1,
+                    desc = this.descendants(data),
+                    size = desc.length,
+                    attr;
+
+                if (size) {
+                    this.toggle(node, true, 'collapse');
+                    attr = desc.map(function(d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
+                    this.grid.children(attr).remove();
+                }
+
+            }
+        },
+        _onAfterDrag: function(e, ui) {
+            var 
+                options = this.options,
+                indexes = this._indexes,
+                fields = options.fields,
+                stacks = this._data,
+                node = ui.item,
+                offset = ui.position.left,
+                data = this.dataof(node),
+                prev = node.prev('.bt-node'),
+                next = node.next('.bt-node');
+
+            var lookup = function(current, start, level) {
+                var 
+                    siblings = [],
+                    target = level - 1,
+                    look = stacks[start],
+                    curr;
+
+                target = target < 0 ? 0 : target;
+
+                while(look) {
+                    curr = +look[fields.level];
+                    if (curr === level) siblings.push(look);
+                    if (curr === target) break;
+                    look = stacks[--start];
+                }
+                
+                if (siblings.length) {
+                    return ['after', siblings[siblings.length - 1], current];
+                } else {
+                    return ['append', look, current];    
+                }
+            };
+
+            node.removeClass('bt-moving');
+            
+            // define level
+            var 
+                dataLevel = +data[fields.level],
+                dragLevel = 0,
+                tolerance = 5,
+                args = [];
+
+            offset = offset - options.buffSize;
+
+            if (offset + tolerance < -options.dragSize) {
+                dragLevel = dataLevel - (Math.round(Math.abs(offset) / options.stepSize));
+            } else if (offset > options.dragSize) {
+                dragLevel = dataLevel + (Math.round(offset / options.stepSize));
+            } else {
+                dragLevel = dataLevel;
+            }
+
+            dragLevel = dragLevel < 0 ? 0 : dragLevel;
+
+            if (prev.length) {
+                var 
+                    prevData = this.dataof(prev),
+                    prevLevel = this.level(prevData),
+                    prevIndex = this.index(prevData),
+                    prevChild = prevData._child || [];
+
+                if (dragLevel > prevLevel) {
+                    if (prevChild.length) {
+                        if ( ! this.isexpanded(prevData)) {
+                            args = ['after', prevData, data];
+                        } else {
+                            args = ['before', this.get(prevChild[0]), data];    
+                        }
+                    } else {
+                        args = ['append', prevData, data];
+                    }
+                } else if (dragLevel === prevLevel) {
+                    args = ['after', prevData, data];
+                } else {
+                    args = lookup(data, prevIndex, dragLevel);
+                }
+            } else if (next.length) {
+                var nextData = this.dataof(next);
+                args = ['before', nextData, data];
+            } else {
+                this._error('move(): nothing to move!');
+            }
+
+            if (args.length) {
+                var action = args.shift(),
+                    result = this[action].apply(this, args);
+                
+                if (result) {
+                    if ( ! this.isvisible(data)) this.scroll(data);
+                } else {
+                    this._debug();
+                }
+            } else {
+                this._debug();
+            }
+        },
+        _error: function(message) {
+            this._message = message;
+        },
+        _debug: function(message) {
+            if (this.options.debug) {
+                message = message === undef ? this._message : message;
+                console.log(message);    
+            }
+        },
+        destroy: function(remove) {
+            this.edtext.off('.bt');
+            this.element.off('.bt');
+            this.element.sortable('destroy');
+            
+            $.removeData(this.element[0], 'bigtree');
+
+            this._data = null;
+            this._indexes = null;
+            this._selected = null;
+
+            if (remove !== undef && remove === true) {
+                this.editor.remove();
+                this.element.remove();
+            }
         }
+    };
 
-        return $list;
-    }
+    $.fn.bigtree = function(options) {
+        var 
+            args = $.makeArray(arguments),
+            init = $.type(args[0]) !== 'string',
+            list,
+            func;
 
-}
+        list = this.each(function(){
+            var obj = $.data(this, 'bigtree');
+            
+            if ( ! obj) {
+                $.data(this, 'bigtree', (obj = new BigTree(this, options)));
+            }
 
-/** Add */
-/*
--- moves a subtree before the specified position
--- if the position is the rgt of a node, the subtree will be its last child
--- if the position is the lft of a node, the subtree will be inserted before
--- @param l the lft of the subtree to move
--- @param r the rgt of the subtree to move
--- @param p the position to move the subtree before
-update tree
-set
-    lft = lft + if (:p > :r,
-        if (:r < lft and lft < :p,
-            :l - :r - 1,
-            if (:l <= lft and lft < :r,
-                :p - :r - 1,
-                0
-            )
-        ),
-        if (:p <= lft and lft < :l,
-            :r - :l + 1,
-            if (:l <= lft and lft < :r,
-                :p - :l,
-                0
-            )
-        )
-    ),
-    rgt = rgt + if (:p > :r,
-        if (:r < rgt and rgt < :p,
-            :l - :r - 1,
-            if (:l < rgt and rgt <= :r,
-                :p - :r - 1,
-                0
-            )
-        ),
-        if (:p <= rgt and rgt < :l,
-            :r - :l + 1,
-            if (:l < rgt and rgt <= :r,
-                :p - :l,
-                0
-            )
-        )
-    )
-where :r < :p or :p < :l;
+            if ( ! init) {
+                var method = args.shift();
+                if ($.isFunction(obj[method])) {
+                    func = obj[method].apply(obj, args);    
+                } else {
+                    throw Error(method + ' is not function!');
+                }
+            }
+        });
 
--- swaps two subtrees, where A is the subtree having the lower lgt/rgt values
--- and B is the subtree having the higher ones
--- @param al the lft of subtree A
--- @param ar the rgt of subtree A, must be lower than bl
--- @param bl the lft of subtree B, must be higher than ar
--- @param br the rgt of subtree B
-update tree
-set
-    lft = lft + @offset := if (lft > :ar and rgt < :bl,
-        :br - :bl - :ar + :al,
-        if (lft < :bl, :br - :ar, :al - :bl)
-    ),
-    rgt = rgt + @offset
-where lft >= :al and lft <= :br and :ar < :bl;
+        return init ? list : func;
+    };
 
-*/
+}(jQuery));

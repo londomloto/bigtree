@@ -63,7 +63,7 @@ On progress...
     
     For illustration, we have these hierarchical structure:
 
-    [[https://github.com/londomloto/bigtree/blob/master/tree.jpg?raw=true]]
+    ![tree](bigtree/tree.jpg?raw=true)
     
 
     ```javascript

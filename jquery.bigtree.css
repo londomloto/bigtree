@@ -70,15 +70,15 @@
 .bt-node-elbow.elbow-line:before {
 	border-left: solid 1px #ccc;
 	left: 10px;
-	top: -1px;
-	bottom: -1px;
+	top: -2px;
+	bottom: -2px;
 }
 
 .bt-node-elbow.elbow-end:before {
 	border-left: solid 1px #ccc;
 	left: 10px;
-	top: -1px;
-	bottom: -1px;
+	top: -2px;
+	bottom: -2px;
 }
 
 .bt-node-elbow.elbow-end:after {

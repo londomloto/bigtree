@@ -30,7 +30,7 @@ http://londomloto.github.io/bigtree/demo/
 
 1. Loading data
     
-    For illustration, we have these hierarchical structure:
+    For illustration, we have hierarchical structure:
 
     ![tree](tree.jpg?raw=true)
     

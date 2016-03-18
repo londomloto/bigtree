@@ -63,7 +63,7 @@ On progress...
     
     For illustration, we have these hierarchical structure:
 
-    ![tree](bigtree/tree.jpg?raw=true)
+    ![tree](tree.jpg?raw=true)
     
 
     ```javascript

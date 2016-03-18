@@ -27,45 +27,14 @@ npm install jquery-bigtree
 http://londomloto.github.io/bigtree/demo/
 
 ## Example Usages
-1. Client Usage
-    
-    ```xml
-    <!DOCTYPE html>
-    <html>
-    <head>
-    	<meta charset="UTF-8">
-        <title>Bigtree</title>
-        <link type="text/css" rel="stylesheet" href="jquery.bigtree.css">
-    </head>
-    <body>
-    	
-        <div id="tree"></div>
-        
-        <!-- dependencies -->
-        <script src="{PATH_TO_JQUERY}"></script>
-        <script src="{PATH_TO_JQUERY_UI}"></script>
-        <script src="{PATH_TO_JQUERY_THROTTLE}"></script>
-        <script src="{PATH_TO_JSRENDER}"></script>
-        <!-- /dependencies -->
 
-        <!-- core -->
-        <script src="jquery.bigtree.js"></script>
-        <!-- /core -->
-        
-        <!-- your app -->
-        
-        <!-- /your app -->
-    </body>
-    </html>
-    ```
-    
-2. Loading data
+1. Loading data
     
     For illustration, we have these hierarchical structure:
 
     ![tree](tree.jpg?raw=true)
     
-
+    
     ```javascript
     var data = [
         {id: 1, text: 'ROOT', left: 1, right: 10, level: 0, leaf: 0, expand: 1, path: '1'},
@@ -78,7 +47,7 @@ http://londomloto.github.io/bigtree/demo/
     $('#tree').bigtree('load', data, true);
     ```
 
-4. Using Events
+2. Using Events
     
     ```javascript
     // edit event

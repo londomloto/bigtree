@@ -61,25 +61,21 @@ On progress...
     
 2. Loading data
     
+    For illustration, we have these hierarchical structure:
+
+    [[https://github.com/londomloto/bigtree/blob/master/tree.jpg?raw=true]]
+    
+
     ```javascript
     var data = [
-        {id: 1, text: 'Node 1', level: 0, path: '1'},
-        {id: 2, text: 'Node 2', level: 1, path: '1/2'},
-        {id: 3, text: 'Node 3', level: 0, path: '3'},
-        {id: 4, text: 'Node 4', level: 1, path: '3/4'},
-        {id: 5, text: 'Node 5', level: 2, path: '3/4/5'},
-        {id: 6, text: 'Node 6', level: 2, path: '3/4/6'}
+        {id: 1, text: 'ROOT', left: 1, right: 10, level: 0, path: '1'},
+        {id: 2, text: 'A',    left: 2, right:  7, level: 1, path: '1/2'},
+        {id: 3, text: 'B',    left: 3, right:  4, level: 0, path: '1/2/3'},
+        {id: 4, text: 'C',    left: 5, right:  6, level: 1, path: '1/2/4'},
+        {id: 5, text: 'D',    left: 8, right:  9, level: 2, path: '1/5'}
     ];
     
     $('#tree').bigtree('load', data, true);
-    
-    // output:
-    - Node 1
-      |____ Node 2
-    - Node 3
-      |____ Node 4
-           |_____ Node 5        
-           |_____ Node 6
     ```
 
 4. Using Events

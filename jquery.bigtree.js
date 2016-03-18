@@ -261,7 +261,7 @@
             this.edtext.off('click.bt keypress.bt');
 
             this.element.on({
-                'scroll.bt': $.debounce(options.delay, $.proxy(function(){
+                'scroll.bt': $.throttle(options.delay, $.proxy(function(){
                     // we need hold until grid render finished
                     if (this._busy) return;
                     

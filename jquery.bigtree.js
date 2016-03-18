@@ -154,7 +154,7 @@
         guttSize: 20,
 
         // scroll speed
-        delay: 64,
+        delay: 30,
 
         // leading & trailing rendered nodes
         buffer: 10,

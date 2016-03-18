@@ -129,6 +129,7 @@
      * Default options
      */
     BigTree.defaults = {
+
         fields: {
             id: 'id',
             text: 'text',
@@ -150,13 +151,13 @@
         stepSize: 25,
         
         // gutter from left
-        buffSize: 20,
+        guttSize: 20,
 
         // scroll speed
-        delay: 30,
+        delay: 64,
 
         // leading & trailing rendered nodes
-        buffer: 6,
+        buffer: 10,
 
         // node markup, can contains templating tags supported by jsRender
         markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+
@@ -191,6 +192,7 @@
             this._data = [];
             this._indexes = {};
 
+            this._ranges = [0, 0];
             this._visible = [];
             this._message = '';
             this._uuid = []; 
@@ -233,12 +235,10 @@
             this.editor = $('<div class="bt-editor"><input type="text"></div>');
             this.edtext = this.editor.children('input');
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);
-
-            // init user plugins
-            this._registerPlugins();
+            // this.grid.addClass('test');
 
             // setup template
-            $.templates('btnode_' + (++template), options.markup);
+            this._setupTemplate();
 
             // init sortable
             this.element.sortable({
@@ -246,8 +246,6 @@
                 handle: '.bt-drag',
                 placeholder: 'bt-node-sortable ui-sortable-placeholder'
             });
-
-            
         },
         /** @private */
         _initEvents: function() {
@@ -256,13 +254,22 @@
             this._scrolltop = this.element.scrollTop();
             this._scrolldir = '';
             this._scrolldif = 0;
+            this._busy = false;
 
             // unbinds
             this.element.off('scroll.bt click.bt.expander keydown.bt sortstart.bt sortstop.bt click.bt.select click.bt.startedit');
             this.edtext.off('click.bt keypress.bt');
 
             this.element.on({
-                'scroll.bt': $.debounce(options.delay, $.proxy(this._onScroll, this)),
+                'scroll.bt': $.debounce(options.delay, $.proxy(function(){
+                    // we need hold until grid render finished
+                    if (this._busy) return;
+                    
+                    this._busy = true;
+                    this._onScroll();
+                    this._busy = false;
+                }, this)),
+                // 'scroll.bt': $.debounce(options.delay, $.proxy(this._onScroll, this)),
                 'keydown.bt': $.proxy(this._onNavigate, this),
                 'sortstart.bt': $.proxy(this._onBeforeDrag, this),
                 'sortstop.bt': $.proxy(this._onAfterDrag, this),
@@ -291,13 +298,16 @@
             });
         },
         /** @private */
-        _registerPlugins: function() {
+        _setupTemplate: function() {
             var 
                 plugins = this.options.plugins,
                 markup = $(this.options.markup),
                 tail = markup.find('.bt-plugin.tail'),
                 head = markup.find('.bt-plugin.head'),
                 regex = new RegExp('({[^{]+)this.', 'g');
+
+            // add attr data-index to markup
+            markup.attr('data-index', '{{:index}}');
 
             $.each(plugins, $.proxy(function(i, p){
                 if (p.template) {
@@ -312,7 +322,7 @@
                     // we need to replace some placeholder
                     p.templateString = p.template; // save orig
                     p.template = p.template.replace(regex, '$1__' + p.id + '__');
-
+                    // console.log(p.template);
                     var prop, key;
 
                     for (var prop in p) {
@@ -331,7 +341,9 @@
             markup = $('<div>').append(markup).remove().html();
             regex  = null;
 
-            this.options.markup = markup;
+            // this.options.markup = markup;
+
+            $.templates('btnode_' + (++template), markup);
         },
 
         /** @private */
@@ -342,6 +354,7 @@
             stop  = stop  === undef ? this._data.length : stop;
 
             for (i = start; i < stop; i++)  {
+                this._data[i].index = i;
                 this._indexes[this._data[i][fields.id]] = i;
             }
         },
@@ -418,9 +431,9 @@
                     return d[fields.id] != moved.attr('data-id');
                 });
             }
-            
-            this._suspendPlugins(this._visible);
 
+            this._suspendPlugins(this._visible);
+            
             this.editor.detach();
             this.removableNodes().remove();
 
@@ -468,28 +481,29 @@
                 }
 
                 // attach plugins
-                var k, p, n;
+                var plugin, k;
 
                 if (data.plugins === undef) {
                     data.plugins = {};
                     for (k = 0; k < psize; k++) {
-                        p = $.extend({}, plugins[k]);
-                        data.plugins[p.id] = p;
-                        p.onInit(this, data);
-                        p.update();
-                        this._mixinData(data, p);
+                        plugin = $.extend({}, plugins[k]);
+                        data.plugins[plugin.id] = plugin;
+                        plugin.onInit(this, data);
+                        plugin.update();
+                        this._mixinData(data, plugin);
                     }
                 } else {
-                    for (n in data.plugins) {
-                        p = data.plugins[n];
-                        p.update();
-                        this._mixinData(data, p);
+                    for (k in data.plugins) {
+                        data.plugins[k].update();
+                        this._mixinData(data, data.plugins[k]);
                     }
                 }
+
             }
-            
-            this.grid.append($.templates['btnode_'+template](range, this._helper));
-            
+
+            var html = $.templates['btnode_'+template](range, this._helper);
+            this.grid.append(html);
+
             if (moved.length) {
                 this.element.sortable('refresh');
             } else {
@@ -548,7 +562,10 @@
         },
         /** @private */
         _renderPlugins: function(datas, nodes) {
+            if ( ! this.options.plugins.length) return;
+            
             var node, data, name, plugin;
+
             for (var i = 0, ii = nodes.length; i < ii; i++) {
                 node = $(nodes[i]);
                 data = datas[i];
@@ -570,6 +587,7 @@
         },
         /** @private */
         _suspendPlugins: function(datas) {
+            if ( ! this.options.plugins.length) return;
             for (var i = 0, ii = datas.length; i < ii; i++) {
                 for (var name in datas[i].plugins) {
                     datas[i].plugins[name].onSuspend();
@@ -1025,25 +1043,24 @@
             var 
                 buff = this.options.buffer * this.options.itemSize,
                 spix = this.grid.scrollTop() - this.grid.position().top - buff,
-                epix = spix + this.element.height() + buff * 2,
+                epix = spix + buff + this.element.height() + buff,
                 data = $.grep(this._data, function(d){ return !d._hidden; });
             
             spix = spix < 0 ? 0 : spix;
+            epix = epix < 0 ? 0 : epix;
 
             var 
                 begidx = Math.floor(spix / this.options.itemSize),
                 endidx = Math.ceil(epix / this.options.itemSize),
                 padtop = this.options.itemSize * begidx,
-                padbtm = this.options.itemSize * data.slice(endidx).length + 3 * this.options.itemSize;
+                padbtm = this.options.itemSize * data.slice(endidx).length;
 
             this.grid.css({
                 paddingTop: padtop,
                 paddingBottom: padbtm
             });
 
-            // this.tickStart('render');
             this._renderRange(data, begidx, endidx);
-            // this.tickStop('render');
         },
         scroll: function(data) {
             var 
@@ -1588,17 +1605,23 @@
                 options = this.options,
                 currtop = this.element.scrollTop(),
                 currdir = currtop > this._scrolltop ? 'down' : 'up',
-                buffzone;
+                buffzone,
+                trigger = false;
 
-            if (this._scrolldir != currdir) {
-                this._scrolldif = 0;
-            } else {
+            if (currdir == this._scrolldir) {
                 this._scrolldif = this._scrolldif + Math.abs(currtop - this._scrolltop);
+            } else {
+                trigger = true;
+                this._scrolldif = 0;
             }
 
             buffzone = (options.buffer * options.itemSize - this._buffedge);
-            
-            if (this._scrolldif === 0 || this._scrolldif >= buffzone) {
+
+            if (this._scrolldir == '' || this._scrolldif >= buffzone) {
+                trigger = true;
+            }
+
+            if (trigger) {
                 this._scrolldif = 0;
                 this.render();
             }
@@ -1724,7 +1747,7 @@
                 tolerance = 5,
                 args = [];
 
-            offset = offset - options.buffSize;
+            offset = offset - options.guttSize;
 
             if (offset + tolerance < -options.dragSize) {
                 dragLevel = dataLevel - (Math.round(Math.abs(offset) / options.stepSize));

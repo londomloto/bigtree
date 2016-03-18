@@ -24,7 +24,7 @@ npm install jquery-bigtree
 ```
 
 ## Working Demo
-On progress...
+http://londomloto.github.io/bigtree/demo/
 
 ## Example Usages
 1. Client Usage

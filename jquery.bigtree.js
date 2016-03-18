@@ -157,7 +157,7 @@
         delay: 30,
 
         // leading & trailing rendered nodes
-        buffer: 10,
+        buffer: 0,
 
         // node markup, can contains templating tags supported by jsRender
         markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+

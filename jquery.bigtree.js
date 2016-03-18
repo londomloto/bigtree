@@ -154,10 +154,10 @@
         guttSize: 20,
 
         // scroll speed
-        delay: 64,
+        delay: 30,
 
         // leading & trailing rendered nodes
-        buffer: 10,
+        buffer: 0,
 
         // node markup, can contains templating tags supported by jsRender
         markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+
@@ -261,7 +261,7 @@
             this.edtext.off('click.bt keypress.bt');
 
             this.element.on({
-                'scroll.bt': $.debounce(options.delay, $.proxy(function(){
+                'scroll.bt': $.throttle(options.delay, $.proxy(function(){
                     // we need hold until grid render finished
                     if (this._busy) return;
                     

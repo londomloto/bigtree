@@ -1,6 +1,6 @@
 {
   "name": "jquery-bigtree",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "High performance jQuery plugin for rendering hierarchical data based on nested set model (pre-order tree)",
   "main": "jquery.bigtree.js",
   "scripts": {
@@ -24,8 +24,6 @@
   "homepage": "https://github.com/londomloto/bigtree#readme",
   "files": [
     "jquery.bigtree.js",
-    "jquery.bigtree.css",
-    "jquery.throttle.js",
-    "jsrender.js"
+    "jquery.bigtree.css"
   ]
 }

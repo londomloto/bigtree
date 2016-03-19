@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Demo Bigtree</title>
-    <link rel="stylesheet" type="text/css" href="../jquery.bigtree.css">
+    <link rel="stylesheet" type="text/css" href="../../jquery.bigtree.css">
     <style>
         body {
             font-family: Roboto, Arial, sans-serif;
@@ -54,7 +54,7 @@
     <script src="https://cdn.rawgit.com/BorisMoore/jsrender/master/jsrender.js"></script>
     <!-- end dependencies -->
     
-    <script src="../jquery.bigtree.js"></script>
+    <script src="../../jquery.bigtree.js"></script>
     
     <script>
         // init
@@ -64,7 +64,7 @@
         
         function load(next) {
           $.ajax({
-            url: '../data.json'
+            url: '../../data.json'
           }).done(function(json){
             var data = json.slice(s, l);
             $('#example').bigtree('load', data, true);    

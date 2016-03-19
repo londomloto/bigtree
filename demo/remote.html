@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Demo Bigtree</title>
+    <link rel="stylesheet" type="text/css" href="../jquery.bigtree.css">
+    <style>
+        body {
+            font-family: Roboto, Arial, sans-serif;
+            
+        }
+        aside, section {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+        }
+        aside {
+            width: 250px;
+            left: 0;
+            padding: 15px;
+        }
+        section {
+            left: 250px;
+            right: 0;
+        }
+        #example {
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <aside>
+        <h2>Bigtree Demo</h2>
+        <p>Features:</p>
+        <ul>
+            <li>Movable</li>
+            <li>Editable</li>
+            <li>Keyboard (up/down)</li>
+        </ul>
+        <p>Support:</p>
+        <a href="mailto:roso.sasongko@gmail.com">roso.sasongko@gmail.com</a>
+        <p>Github:</p>
+        <a href="https://github.com/londomloto/">londomloto</a>
+    </aside>
+    
+    <section>
+        <div id="example"></div>
+    </section>
+    
+    <!-- dependencies -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.0/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdn.rawgit.com/cowboy/jquery-throttle-debounce/master/jquery.ba-throttle-debounce.js"></script>
+    <script src="https://cdn.rawgit.com/BorisMoore/jsrender/master/jsrender.js"></script>
+    <!-- end dependencies -->
+    
+    <script src="../jquery.bigtree.js"></script>
+    
+    <script>
+        // init
+        $('#example').bigtree();
+        
+        var s = 0, l = 100, t = 10000;
+        
+        function load(next) {
+          $.ajax({
+            url: '../data.json'
+          }).done(function(json){
+            var data = json.slice(s, l);
+            $('#example').bigtree('load', data, true);    
+            s += l;
+            if (s + l < t) load();
+          })
+        }
+        
+        load();
+        
+    </script>
+</body>
+</html>

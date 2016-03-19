@@ -60,18 +60,26 @@
         // init
         $('#example').bigtree();
         
-        var s = 0, l = 100, t = 10000;
+        var s = 0, l = 100, p = 0, t = 10000;
         
-        function load(next) {
+        function load() {
+            
           $.ajax({
             url: '../../data.json',
             dataType: 'json'
           }).done(function(json){
             var data = json.slice(s, l);
-            $('#example').bigtree('load', data, true);    
+            
+            $('#example').bigtree('load', data);
+            
+            if ( ! $('#example').bigtree('hasScroll')) {
+                $('#example').bigtree('render');
+            }
+            
             s += l;
-            if (s + l < t) load();
-          })
+            if (s < t) load();
+          });
+          
         }
         
         load();

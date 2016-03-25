@@ -144,10 +144,10 @@
         guttSize: 20,
 
         // scroll speed
-        delay: 60,
+        delay: 30,
 
         // leading & trailing rendered nodes
-        buffer: 10,
+        buffer: 2,
 
         // node markup, can contains templating tags supported by jsRender
         markup: '<div data-id="{{:id}}" class="bt-node bt-hbox">'+
@@ -243,7 +243,7 @@
             this.edtext.off('click.bt keypress.bt');
 
             this.element.on({
-                'scroll.bt.delay': $.debounce(this.options.delay, $.proxy(this._onDelayedScroll, this)),
+                'scroll.bt.delay': $.throttle(this.options.delay, $.proxy(this._onDelayedScroll, this)),
                 'keydown.bt': $.proxy(this._onNavigate, this),
                 'sortstart.bt': $.proxy(this._onBeforeDrag, this),
                 'sortstop.bt': $.proxy(this._onAfterDrag, this),

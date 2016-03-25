@@ -9,114 +9,104 @@
  *      - jQuery Throttle (http://benalman.com/pr
  *      ojects/jquery-throttle-debounce-plugin/)
  *
- * @author Roso Sasongko <roso@kct.co.id>
+ * @author Roso Sasongko <roso.sasongko@gmail.com>
  */
-(function($, undef){
-    // preparing for striptags
-    /*var bodyre = '((?:[^"\'>]|"[^"]*"|\'[^\']*\')*)',
-        tagsre = new RegExp(
-            '<(?:'
-            + '!--(?:(?:-*[^->])*--+|-?)'
-            + '|script\\b' + bodyre + '>[\\s\\S]*?</script\\s*'
-            + '|style\\b' + bodyre + '>[\\s\\S]*?</style\\s*'
-            + '|/?[a-z]'
-            + bodyre
-            + ')>',
-            'gi'
-        );*/
+(function ($, undef){
     
     /**
-     * Cast element to jQuery object
+     * Render constants
      */
-    function make(el) {
-        return el instanceof jQuery ? el : $(el);
-    }
+    var RENDER_APPEND = 'append';
+    var RENDER_PREPEND = 'prepend';
+    
+    /**
+     * Direction constants
+     */
+    var DIR_UP = 'up';
+    var DIR_DOWN = 'down';
 
     /**
-     * Get index of element from array.
-     * This is fastest method rather than using Array.indexOf by avoiding
-     * several type checking. See polyfill:
-     * https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Global_Objects/Array/indexOf
+     * Regex for text striptags
      */
-    function indexof(array, elem) {
-        var size = array.length, i = 0;
-        while(i < size) {
-            if (array[i] === elem) {
-                return i;
-            }
-            i++;
-        }
-        return -1;
-    }
-
-    function firstof(array) {
-        array = array || [];
-        return array[0];
-    }
-
-    function lastof(array) {
-        array = array || [];
-        return array[array.length - 1];
-    }
+    var REG_BODY = '((?:[^"\'>]|"[^"]*"|\'[^\']*\')*)';
+    var REG_STRIP = new RegExp(
+        '<(?:'
+        + '!--(?:(?:-*[^->])*--+|-?)'
+        + '|script\\b' + REG_BODY + '>[\\s\\S]*?</script\\s*'
+        + '|style\\b' + REG_BODY + '>[\\s\\S]*?</style\\s*'
+        + '|/?[a-z]'
+        + REG_BODY
+        + ')>',
+        'gi'
+    );
 
     /**
-     * Select text inside particular input field.
-     * Don't confuse with $.select, which actualy used for triggering `select` event.
-     */
-    function seltext(input, beg, end) {
-        var dom = input[0], range;
-
-        beg = beg === undef ? 0 : beg;
-        end = end === undef ? input.val().length : end;
-        
-        if (dom.setSelectionRange) {
-            dom.setSelectionRange(beg, end);
-            if (/chrom(e|ium)/.test(navigator.userAgent.toLowerCase())) {
-                var evt = jQuery.Event('keydown', {which: 37});
-                input.triggerHandler(evt);
-            }
-        } else if (dom.createTextRange) {
-            range = dom.createTextRange();
-            range.collapse(true);
-            range.moveEnd('character', end);
-            range.moveStart('character', beg);
-            range.select();
-        }
-    }
-
-    function debug() {
-        var 
-            args = $.makeArray(arguments),
-            arr = ['[' + args.shift() + ']'];
-
-        for (var i = 0, j = args.length; i < j; i++) {
-            arr.push(' ; ');
-            arr.push(args[i]);
-        }
-
-        console.log.apply(console, arr);
-    }
-
-    /**
-     * Sanitize (remove) html tags from string
-     */
-    /*function striptags(txt) {
-        var old;
-        do {
-            old = txt;
-            txt = txt.replace(tagsre, '');
-        } while (txt != old);
-        return txt.replace(/</g, '&lt;');
-    }*/
-
-    /**
-     * Special counter for cached template,
-     * avoids template overriding
-     *
-     * @type {Number}
+     * Template counter
      */
     var template = 0;
+    
+    /**
+     * Internal helper
+     */
+    var _h = {
+        prototypeof: function (object) {
+            if (Object.getPrototypeOf === 'function') {
+                return Object.getPrototypeOf(object);
+            }
+            return object.__proto__ === 'object' 
+                ? object.__proto__ 
+                : object.constructor.prototype;
+        },
+        indexof: function (array, item) {
+            var len = array.length, i = 0;
+            while(i < len) {
+                if (array[i] === item) {
+                    return i;
+                }
+                i++;
+            }
+            return -1;
+        },
+        firstof: function (array) {
+            return (array || [])[0];
+        },
+        lastof: function (array) {
+            array = array || [];
+            return array[array.length - 1];
+        },
+        seltext: function (input, beg, end) {
+            var dom = input[0], range;
 
+            beg = beg === undef ? 0 : beg;
+            end = end === undef ? input.val().length : end;
+            
+            if (dom.setSelectionRange) {
+                dom.setSelectionRange(beg, end);
+                if (/chrom(e|ium)/.test(navigator.userAgent.toLowerCase())) {
+                    var evt = jQuery.Event('keydown', {which: 37});
+                    input.triggerHandler(evt);
+                }
+            } else if (dom.createTextRange) {
+                range = dom.createTextRange();
+                range.collapse(true);
+                range.moveEnd('character', end);
+                range.moveStart('character', beg);
+                range.select();
+            }
+        },
+        transend: function() {
+            return 'webkitTransitionEnd otransitionend oTransitionEnd msTransitionEnd transitionend';
+        },
+        sanitize: function(text) {
+            var old;
+            do {
+                old = text;
+                text = text.replace(REG_STRIP, '');
+            } while (text != old);
+            return text.replace(/</g, '&lt;');
+        }
+    };
+    
     /**
      * Constructor
      */
@@ -154,19 +144,13 @@
         guttSize: 20,
 
         // scroll speed
-        delay: 30,
+        delay: 60,
 
         // leading & trailing rendered nodes
-        buffer: 0,
+        buffer: 10,
 
         // node markup, can contains templating tags supported by jsRender
-        markup: '<div class="bt-node bt-hbox {{if _last}}bt-last{{/if}}" '+
-                    'data-id="{{:id}}" '+
-                    'data-level="{{:level}}" '+
-                    'data-leaf="{{:leaf}}">'+
-                    '{{for _elbows}}'+
-                        '<div class="bt-node-elbow {{:type}}">{{:icon}}</div>'+
-                    '{{/for}}'+
+        markup: '<div data-id="{{:id}}" class="bt-node bt-hbox">'+
                     '<div class="bt-node-body bt-flex bt-hbox">'+
                         '<div class="bt-drag"></div>'+
                         '<div class="bt-plugin head"></div>'+
@@ -174,6 +158,16 @@
                         '<div class="bt-plugin tail"></div>'+
                         '<div class="bt-trash"></div>'+
                     '</div>'+
+                '</div>',
+
+        masker: '<div class="bt-mask spinner-loading">'+ 
+                    '<div class="spinner">'+ 
+                        '<div class="rect1"></div>'+ 
+                        '<div class="rect2"></div>'+  
+                        '<div class="rect3"></div>'+  
+                        '<div class="rect4"></div>'+  
+                        '<div class="rect5"></div>'+ 
+                    '</div>'+ 
                 '</div>',
 
         plugins: [],
@@ -185,50 +179,30 @@
      * Prototype
      */
     BigTree.prototype = {
-        init: function(options) {
+        init: function (options) {
             this.options = $.extend(true, {}, BigTree.defaults, options || {});
+            
+            this._buffer = this.options.itemSize * this.options.buffer;
+            this._edges  = Math.floor(this._buffer / 2);
 
-            this._buffedge = Math.floor(this.options.buffer / 2) * this.options.itemSize;
             this._data = [];
             this._indexes = {};
 
             this._ranges = [0, 0];
             this._visible = [];
             this._message = '';
-            this._uuid = []; 
 
             this._helper = {};
 
             this._initComponent();
             this._initEvents();
-            this._fireEvent('init');
 
-        },
-        _guid: function() {
+            this.fire('init');
 
-            if ( ! this._uuid.length)
-                for (var i = 0; i < 256; i++)
-                    this._uuid[i] = (i < 16 ? '0' : '') + (i).toString(16);
-
-            var 
-                uu = this._uuid,
-                d0 = Math.random()*0xffffffff|0,
-                d1 = Math.random()*0xffffffff|0,
-                d2 = Math.random()*0xffffffff|0,
-                d3 = Math.random()*0xffffffff|0;
-
-            return uu[d0&0xff]+uu[d0>>8&0xff]+uu[d0>>16&0xff]+uu[d0>>24&0xff]+
-                uu[d1&0xff]+uu[d1>>8&0xff]+
-                uu[d1>>16&0x0f|0x40]+uu[d1>>24&0xff]+
-                uu[d2&0x3f|0x80]+uu[d2>>8&0xff]+
-                uu[d2>>16&0xff]+uu[d2>>24&0xff]+
-                uu[d3&0xff]+uu[d3>>8&0xff]+uu[d3>>16&0xff]+uu[d3>>24&0xff];
         },
         /** @private */
-        _initComponent: function() {
-            var 
-                options = this.options,
-                fields = options.fields;
+        _initComponent: function () {
+            var options = this.options, fields = options.fields;
 
             this.element.addClass('bigtree').attr('tabindex', 1);
 
@@ -236,7 +210,9 @@
             this.edtext = this.editor.children('input');
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);
             // this.grid.addClass('test');
-
+            
+            this.masker = $(this.options.masker);
+            
             // setup template
             this._setupTemplate();
 
@@ -246,50 +222,48 @@
                 handle: '.bt-drag',
                 placeholder: 'bt-node-sortable ui-sortable-placeholder'
             });
+
+            // force scroll to top
+            this.element.scrollTop(0);
         },
         /** @private */
-        _initEvents: function() {
-            var options = this.options;
-
-            this._scrolltop = this.element.scrollTop();
-            this._scrolldir = '';
-            this._scrolldif = 0;
-            this._busy = false;
+        _initEvents: function () {
+            this._lastscr = this.element.scrollTop();
+            this._lastdir = '';
+            this._lastdif = 0;
 
             // unbinds
-            this.element.off('scroll.bt click.bt.expander keydown.bt sortstart.bt sortstop.bt click.bt.select click.bt.startedit');
+            this.element.off(
+                'scroll.bt.delay '+
+                'click.bt.expander '+
+                'keydown.bt '+
+                'click.bt.select '+
+                'click.bt.startedit');
+
             this.edtext.off('click.bt keypress.bt');
 
             this.element.on({
-                'scroll.bt': $.throttle(options.delay, $.proxy(function(){
-                    // we need hold until grid render finished
-                    if (this._busy) return;
-                    
-                    this._busy = true;
-                    this._onScroll();
-                    this._busy = false;
-                }, this)),
-                // 'scroll.bt': $.debounce(options.delay, $.proxy(this._onScroll, this)),
+                'scroll.bt.delay': $.debounce(this.options.delay, $.proxy(this._onDelayedScroll, this)),
                 'keydown.bt': $.proxy(this._onNavigate, this),
                 'sortstart.bt': $.proxy(this._onBeforeDrag, this),
                 'sortstop.bt': $.proxy(this._onAfterDrag, this),
-                'click.bt.select': $.proxy(function(){ this.deselectAll(); }, this)
+                'click.bt.select': $.proxy(function (){ this.deselectAll(); }, this)
             });
 
             this.element.on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
-
-            this.element.on('click.bt.startedit', '.bt-text', $.proxy(function(e){
+            
+            this.element.on('click.bt.startedit', '.bt-text', $.proxy(function (e){
                 e.stopPropagation();
                 var node = $(e.currentTarget).closest('.bt-node');
                 this._startEdit(node);
             }, this));
 
             this.edtext.on({
-                'click.bt': function(e){
+                'click.bt': function (e){
                     e.preventDefault();
                     e.stopPropagation();
                 },
-                'keypress.bt': $.proxy(function(e){
+                'keypress.bt': $.proxy(function (e){
                     if (e.keyCode === 13) {
                         e.preventDefault();
                         this._stopEdit(false);
@@ -298,24 +272,29 @@
             });
         },
         /** @private */
-        _setupTemplate: function() {
+        _setupTemplate: function () {
             var 
                 plugins = this.options.plugins,
                 markup = $(this.options.markup),
                 tail = markup.find('.bt-plugin.tail'),
                 head = markup.find('.bt-plugin.head'),
-                regex = new RegExp('({[^{]+)this.', 'g');
+                regex = new RegExp('({[^{]+)this.', 'g'),
+                style = markup.attr('class');
 
-            // add attr data-index to markup
-            markup.attr('data-index', '{{:index}}');
+            // add attr data-number & :elbows holder
+            markup.attr('data-number', '{{:_number}}').prepend('{{:_elbows}}');
 
-            $.each(plugins, $.proxy(function(i, p){
+            // add :last holder
+            style += ' {{if _last}}bt-last{{/if}} ';
+            markup.attr('class', style);
+            
+            $.each(plugins, $.proxy(function (i, p){
                 if (p.template) {
-                    // mandatory function
-                    var proto = p.constructor.prototype;
-
+                    
+                    var proto = _h.prototypeof(p);
+                    
                     if (proto.update === undef) {
-                        $.extend(proto, {update: $.noop})
+                        $.extend(proto, {update: $.noop});
                     }
 
                     p.id = p.id === undef ? i : p.id;
@@ -347,24 +326,19 @@
         },
 
         /** @private */
-        _reindex: function(start, stop) {
+        _reindex: function (start, stop) {
             var fields = this.options.fields, i;
             
             start = start === undef ? 0 : start;
             stop  = stop  === undef ? this._data.length : stop;
 
             for (i = start; i < stop; i++)  {
-                this._data[i].index = i;
                 this._indexes[this._data[i][fields.id]] = i;
             }
         },
         /** @private */
-        _rebuild: function(start, stop) {
-            var 
-                fields = this.options.fields,
-                root = null;
-
-            var i;
+        _rebuild: function (start, stop) {
+            var fields = this.options.fields, root = null, i;
             
             start = start === undef ? 0 : start;
             stop  = stop  === undef ? this._data.length : stop;
@@ -374,13 +348,14 @@
             }
 
             for (i = start; i < stop; i++) {
-                var 
-                    cur = this._data[i],
-                    key = cur[fields.id];
+                var cur = this._data[i];
 
                 // actualy prepare for metadata
-                cur._elbows = [];
+                cur._elbows = '';
                 cur._level  = 0;
+
+                // render number
+                cur._number = -1;
 
                 if (+cur[fields.level] === 0) {
                     if (root) {
@@ -402,7 +377,7 @@
                     par = this._data[this._indexes[pid]];
                     par._child = par._child || [];
 
-                    chd = this._data[this._indexes[lastof(par._child)]];
+                    chd = this._data[this._indexes[_h.lastof(par._child)]];
                     if (chd) chd._last = false;
 
                     cur._root   = root;
@@ -418,8 +393,10 @@
             }
         },
         /** @private */
-        _renderRange: function(stacks, start, end) {
+        _renderRange: function (stacks, start, end, type, cleanup) {
             var 
+                xvisible = this._visible,
+                xranges = this._ranges,
                 plugins = this.options.plugins,
                 fields = this.options.fields,
                 range = stacks.slice(start, end),
@@ -427,103 +404,144 @@
                 psize = plugins.length;
 
             if (moved.length) {
-                range = $.grep(range, function(d){
+                range = $.grep(range, function (d){
                     return d[fields.id] != moved.attr('data-id');
                 });
             }
 
-            this._suspendPlugins(this._visible);
+            var suspend = [], remove = [], render = [];
+
+            // prepare suspend
+            if (cleanup) {
+                remove = this.removableNodes();
+                suspend = xvisible;
+            } else {
+                var dispose = [];
+                remove = this.removableNodes().filter(function(){
+                    var node = $(this), num = +node.attr('data-number');
+                    if ((type == RENDER_APPEND && num < start) || (type == RENDER_PREPEND && num >= end)) {
+                        dispose.push(node.attr('data-id'));
+                        return true;
+                    }
+                });
+                suspend = $.grep(xvisible, function(v){
+                    return _h.indexof(dispose, v[fields.id]) > -1;
+                });
+            }
             
+            this._suspendPlugins(suspend);
             this.editor.detach();
-            this.removableNodes().remove();
-
-            this._ranges = [start, end];
+            
+            this._ranges  = [start, end];
             this._visible = range;
-            this._fireEvent('beforerender', range);
 
-            // prepare rendering node
-            for (var i = 0, ii = range.length; i < ii; i++) {
-                var data = range[i];
+            var rsize = range.length, data, pick, i, j, k, p;
 
-                if (data._metachanged) {
-                    data._metachanged = false;
-                    var
-                        isexpand = +data[fields.expand] === 1,
-                        isparent = +data[fields.leaf] === 0,
-                        level = +data[fields.level],
-                        elbows = [],
-                        lines = [],
-                        owner = data._parent;
+            // prepare render
+            for (i = 0; i < rsize; i++) {
+                data = range[i];
+                pick = false;
 
-                    var type, icon, cls;
-                        
-                    while(owner) {
-                        lines[owner[fields.level]] = owner._last ? 0 : 1;
-                        owner = owner._parent;
-                    }
+                // assign number;
+                data._number = (start + i);
 
-                    for (var j = 0; j <= level; j++) {
-                        if (j === level) {
-                            type = 'elbow-end';
-                            icon = isparent 
-                                ? '<span class="elbow-expander ' + (isexpand ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
-                                : '';
-                        } else {
-                            type = lines[j] === 1 ? 'elbow-line' : '';
-                            icon = '';
+                if ((type == RENDER_APPEND && data._number >= xranges[1]) || 
+                        (type == RENDER_PREPEND && data._number < xranges[0]) || 
+                            cleanup) {
+                    pick = true;
+                }
+
+                // request to render
+                if (pick) {
+                    render.push(data);
+
+                    if (data._metachanged) {
+                        var
+                            elbows = '',
+                            lines = [],
+                            level = +data[fields.level],
+                            owner = data._parent;
+
+                        var icon;
+
+                        data._metachanged = false;
+                            
+                        while(owner) {
+                            lines[owner[fields.level]] = owner._last ? 0 : 1;
+                            owner = owner._parent;
                         }
-                        elbows.push({
-                            type: type,
-                            icon: icon
-                        });
-                    }
-                    data._elbows = elbows;
-                }
 
-                // attach plugins
-                var plugin, k;
-
-                if (data.plugins === undef) {
-                    data.plugins = {};
-                    for (k = 0; k < psize; k++) {
-                        plugin = $.extend({}, plugins[k]);
-                        data.plugins[plugin.id] = plugin;
-                        plugin.onInit(this, data);
-                        plugin.update();
-                        this._mixinData(data, plugin);
+                        for (j = 0; j <= level; j++) {
+                            if (j === level) {
+                                icon = +data[fields.leaf] === 0 
+                                    ? '<span class="elbow-expander ' + (+data[fields.expand] === 1 ? 'elbow-minus' : 'elbow-plus') + '"></span>' 
+                                    : '';
+                                elbows += '<div class="bt-node-elbow elbow-end">'+icon+'</div>';
+                            } else {
+                                elbows += '<div class="bt-node-elbow '+(lines[j] === 1 ? 'elbow-line' : '')+'"></div>';
+                            }
+                        }
+                        data._elbows = elbows;
                     }
-                } else {
-                    for (k in data.plugins) {
-                        data.plugins[k].update();
-                        this._mixinData(data, data.plugins[k]);
+
+                    // attach plugins
+                    if (data.plugins === undef) {
+                        data.plugins = {};
+                        for (k = 0; k < psize; k++) {
+                            p = $.extend({}, plugins[k]);
+                            p.onInit(this, data);
+                            data.plugins[p.id] = p;
+                        }
                     }
                 }
-
             }
 
-            var html = $.templates['btnode_'+template](range, this._helper);
-            this.grid.append(html);
+            this.fire('beforerender', render);
 
+            // update plugin data
+            var vsize = render.length, html;
+
+            for (i = 0; i < vsize; i++) {
+                for (j in render[i].plugins) {
+                    p = render[i].plugins[j];
+                    p.update();
+                    this._mixdata(render[i], p);
+                }
+            }
+
+            html = $.templates['btnode_'+template](render, this._helper);
+
+            if (cleanup) {
+                remove.remove();
+                this.grid.html(html);
+            } else {
+                if (type == RENDER_APPEND) {
+                    remove.remove();    
+                    this.grid.append(html);
+                } else {
+                    this.grid.prepend(html);
+                    remove.remove();
+                }    
+            }
+            
             if (moved.length) {
                 this.element.sortable('refresh');
             } else {
                 this._decorate();
             }
 
-            var visnode = this.visibleNodes();
-
-            this._renderPlugins(this._visible, visnode);
-            this._fireEvent('render', visnode, this._visible);
+            this._renderPlugins(render);
+            this.fire('render', render);
         },
         /** @private */
-        _decorate: function() { 
+        _decorate: function () { 
             if (this._selected) {
                 var snode = this.grid.find('.bt-node[data-id='+this._selected+']');
                 if (snode.length) this.select(snode);
             }
         },
         /** @private */
-        _mixinData: function(data, plugin) {
+        _mixdata: function (data, plugin) {
             if (plugin.templateString && ! /this\./g.test(plugin.templateString)) {
                 return;
             }
@@ -561,63 +579,68 @@
             }
         },
         /** @private */
-        _renderPlugins: function(datas, nodes) {
+        _renderPlugins: function (stacks) {
             if ( ! this.options.plugins.length) return;
             
-            var node, data, name, plugin;
+            var fields = this.options.fields;
+            var data, node, elem, name, plugin;
 
-            for (var i = 0, ii = nodes.length; i < ii; i++) {
-                node = $(nodes[i]);
-                data = datas[i];
+            for (var i = 0, ii = stacks.length; i < ii; i++) {
+                data = stacks[i];
                 for (name in data.plugins) {
                     plugin = data.plugins[name];
                     
+                    node = this.grid.children('[data-id='+data[fields.id]+']');
+                    elem = node.find('[data-plugin-id='+plugin.id+']');
+
+                    plugin.node = node;
+                    plugin.element = elem;
+
+                    plugin.onRender();
+                }
+            }
+        },
+        
+        /** @private */
+        _suspendPlugins: function (stacks) {
+            if ( ! this.options.plugins.length) return;
+            var name, plugin;
+            for (var i = 0, ii = stacks.length; i < ii; i++) {
+                for (name in stacks[i].plugins) {
+                    plugin = stacks[i].plugins[name];
+                    plugin.onSuspend();
                     if (plugin.element) {
                         plugin.element.remove();
                         plugin.element = null;
                         plugin.node = null;
                     }
-                    
-                    plugin.node = node;
-                    plugin.element = node.find('[data-plugin-id='+plugin.id+']');
-                    plugin.onRender();
-
                 }
             }
         },
         /** @private */
-        _suspendPlugins: function(datas) {
-            if ( ! this.options.plugins.length) return;
-            for (var i = 0, ii = datas.length; i < ii; i++) {
-                for (var name in datas[i].plugins) {
-                    datas[i].plugins[name].onSuspend();
-                }
-            }
-        },
-        /** @private */
-        _isvalid: function(data, type, dest) {
+        _isvalid: function (data, action, target) {
             var fields = this.options.fields;
 
-            if (this.isphantom(dest)) {
-                this._error(type + "(): destination doesn't exists!");
+            if (this.isphantom(target)) {
+                this._error(action + "(): target doesn't exists!");
                 return false;
             }
 
-            if (dest[fields.id] == data[fields.id]) {
-                this._error(type + "(): can't move to itself!");
+            if (target[fields.id] == data[fields.id]) {
+                this._error(action + "(): can't move to itself!");
                 return false;
             }
 
-            if (this.isdescendant(data, dest)) {
-                this._error(type + "(): can't move to descendant!");
+            if (this.isdescendant(data, target)) {
+                this._error(action + "(): can't move to descendant!");
                 return false;
             }
 
-            switch(type) {
+            switch(action) {
                 case 'before':
                     if (
-                        this.index(dest) - this.descendants(data).length - 1 == this.index(data) && 
-                        data[fields.level] == dest[fields.level] && 
+                        this.index(target) - this.descendants(data).length - 1 == this.index(data) && 
+                        data[fields.level] == target[fields.level] && 
                         ! this.isphantom(data)
                     ){
                         this._error("before(): nothing to move!");
@@ -627,8 +650,8 @@
 
                 case 'after':
                     if (
-                        this.index(dest) + this.descendants(dest).length + 1 == this.index(data) && 
-                        data[fields.level] == dest[fields.level] && 
+                        this.index(target) + this.descendants(target).length + 1 == this.index(data) && 
+                        data[fields.level] == target[fields.level] && 
                         ! this.isphantom(data)
                     ){
                         this._error("after(): nothing to move!");
@@ -638,14 +661,14 @@
                 break;
 
                 case 'append':
-                    var child = dest._child || [];
+                    var child = target._child || [];
 
                     if (child[child.length - 1] == data[fields.id] && ! this.isphantom(data)) {
                         this._error("append(): nothing to move!");
                         return false;
                     }
 
-                    if ( ! this.isexpanded(dest)) {
+                    if ( ! this.isexpanded(target)) {
                         this._error("append(): can't append to collapsed data!");
                         return false; 
                     }
@@ -655,64 +678,63 @@
             return true;
         },
         /** @private */
-        _detach: function(data, descs) {
+        _take: function (data, descs) {
             var 
                 fields = this.options.fields,
                 offset = this.index(data),
                 size = descs.length;
 
-            if (offset > -1) {
-                data._origin = null;
-                var 
-                    owner = data._parent || null, 
-                    regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
-                    retrm = new RegExp('^/');
-                    level = +data[fields.level];
+            data._origin = null;
 
-                if (owner) {
-                    owner._child = owner._child || [];
-                    var cindex = indexof(owner._child, data[fields.id]);
-                    if (cindex > -1) {
-                        owner._child.splice(cindex, 1);
-                        if ( ! owner._child.length) {
-                            owner[fields.leaf] = '1';
-                        }
-                    }
-                    data._origin = owner;
-                } else {
-                    var prev = this.prev(data);
-                    if (prev) data._origin = prev; 
-                }
+            var 
+                owner = data._parent || null, 
+                regex = new RegExp('.*(?='+(owner ? '/' : '')+data[fields.id]+'/?)'),
+                retrm = new RegExp('^/');
+                level = +data[fields.level];
 
-                this._data.splice(offset, 1);
-                delete this._indexes[data[fields.id]];
-
-                data._parent = null;
-                data._root   = null;
-
-                data[fields.level] = 0;
-                data[fields.path]  = data[fields.path].replace(regex, '').replace(retrm, '');
-
-                if (size) {
-                    this._data.splice(offset, size);
-                    for (var i = 0; i < size; i++) {
-                        descs[i]._root = null;
-                        
-                        descs[i][fields.path]  = descs[i][fields.path].replace(regex, '').replace(retrm, '');
-                        descs[i][fields.level] = +descs[i][fields.level] - level;
-
-                        delete this._indexes[descs[i][fields.id]];
+            if (owner) {
+                owner._child = owner._child || [];
+                var cindex = _h.indexof(owner._child, data[fields.id]);
+                if (cindex > -1) {
+                    owner._child.splice(cindex, 1);
+                    if ( ! owner._child.length) {
+                        owner[fields.leaf] = '1';
                     }
                 }
-
-                regex = null;
-                retrm = null;
-
-                this._reindex(offset);
+                data._origin = owner;
+            } else {
+                var prev = this.prev(data);
+                if (prev) data._origin = prev; 
             }
+
+            this._data.splice(offset, 1);
+            delete this._indexes[data[fields.id]];
+
+            data._parent = null;
+            data._root   = null;
+
+            data[fields.level] = 0;
+            data[fields.path]  = data[fields.path].replace(regex, '').replace(retrm, '');
+
+            if (size) {
+                this._data.splice(offset, size);
+                for (var i = 0; i < size; i++) {
+                    descs[i]._root = null;
+                    
+                    descs[i][fields.path]  = descs[i][fields.path].replace(regex, '').replace(retrm, '');
+                    descs[i][fields.level] = +descs[i][fields.level] - level;
+
+                    delete this._indexes[descs[i][fields.id]];
+                }
+            }
+
+            regex = null;
+            retrm = null;
+
+            this._reindex(offset);
         },
         /** @private */
-        _attach: function(data, descs, type, dest) {
+        _move: function (data, descs, action, target) {
             var 
                 fields = this.options.fields,
                 dsize = descs.length,
@@ -726,13 +748,13 @@
                 i;
 
             // define offset
-            switch(type) {
+            switch(action) {
                 case 'after':
-                    offset = this.index(dest);
-                    level = +dest[fields.level];
-                    owner = dest._parent;
-                    root = dest._root;
-                    pos = +dest[fields.left] + this.size(dest);
+                    offset = this.index(target);
+                    level = +target[fields.level];
+                    owner = target._parent;
+                    root = target._root;
+                    pos = +target[fields.left] + this.size(target);
 
                     if (owner) {
                         prefix = owner[fields.path] + '/';
@@ -741,16 +763,16 @@
                         bindex = offset;
                     }
 
-                    offset += this.descendants(dest).length + 1;
+                    offset += this.descendants(target).length + 1;
 
                     break;
 
                 case 'before':
-                    offset = this.index(dest);
-                    level = +dest[fields.level];
-                    owner = dest._parent;
-                    root = dest._root;
-                    pos = +dest[fields.left];
+                    offset = this.index(target);
+                    level = +target[fields.level];
+                    owner = target._parent;
+                    root = target._root;
+                    pos = +target[fields.left];
 
                     if (owner) {
                         prefix = owner[fields.path] + '/';
@@ -760,169 +782,185 @@
                     break;
 
                 case 'append':
-                    prefix = dest[fields.path] + '/';
-                    offset = this.index(dest);
-                    level = +dest[fields.level] + 1;
-                    root = dest._root;
-                    pos = +dest[fields.right];
+                    prefix = target[fields.path] + '/';
+                    offset = this.index(target);
+                    level = +target[fields.level] + 1;
+                    root = target._root;
+                    pos = +target[fields.right];
 
                     bindex = offset;
-                    offset += this.descendants(dest).length + 1;
+                    offset += this.descendants(target).length + 1;
 
-                    if (dest[fields.leaf] == '1') {
-                        dest[fields.leaf] = '0';
+                    if (target[fields.leaf] == '1') {
+                        target[fields.leaf] = '0';
                     }
 
                     break;
             }
 
-            if (offset > -1) {
+            this._data.splice(offset, 0, data);
 
-                this._data.splice(offset, 0, data);
+            data._root = root;
+            data[fields.level] = level;
+            data[fields.path] = prefix + data[fields.path];
 
-                data._root = root;
-                data[fields.level] = level;
-                data[fields.path] = prefix + data[fields.path];
-
-                if (dsize) {
-                    Array.prototype.splice.apply(this._data, [(offset + 1), 0].concat(descs));
-                    for (i = 0; i < dsize; i++) {
-                        descs[i][fields.level] = +descs[i][fields.level] + level;
-                        descs[i][fields.path]  = prefix + descs[i][fields.path];
-                    }
+            if (dsize) {
+                Array.prototype.splice.apply(this._data, [(offset + 1), 0].concat(descs));
+                for (i = 0; i < dsize; i++) {
+                    descs[i][fields.level] = +descs[i][fields.level] + level;
+                    descs[i][fields.path]  = prefix + descs[i][fields.path];
                 }
-                
-                this._reindex(offset);
+            }
+            
+            this._reindex(offset);
 
-                var origin, oidx;
+            var origin = data._origin, oidx;
 
-                if ((origin = data._origin)) {
-                    oidx = this.index(origin);
-                    if (oidx < bindex) bindex = oidx;
-                    delete data._origin;
-                }
+            if (origin) {
+                oidx = this.index(origin);
+                if (oidx < bindex) bindex = oidx;
+                delete data._origin;
+            }
 
-                // update like SQL
-                var 
-                    p = pos,
-                    l = +data[fields.left],
-                    r = +data[fields.right],
-                    j = this._data.length,
-                    d,
-                    x,
-                    y;
+            // update like SQL
+            var 
+                p = pos,
+                l = +data[fields.left],
+                r = +data[fields.right],
+                j = this._data.length,
+                d,
+                x,
+                y;
 
-                for (i = 0; i < j; i++) {
-                    d = this._data[i];
+            for (i = 0; i < j; i++) {
+                d = this._data[i];
 
-                    x = +d[fields.left];
-                    y = +d[fields.right];
+                x = +d[fields.left];
+                y = +d[fields.right];
 
-                    if (r < p || p < l) {
+                if (r < p || p < l) {
 
-                        if (p > r) {
-                            if (r < x && x < p) {
-                                x += l - r - 1;
-                            } else if (l <= x && x < r) {
-                                x += p - r - 1;
-                            } else {
-                                x += 0;
-                            }
-
-                            if (r < y && y < p) {
-                                y += l - r - 1;
-                            } else if (l < y && y <= r) {
-                                y += p - r - 1;
-                            } else {
-                                y += 0;
-                            }
+                    if (p > r) {
+                        if (r < x && x < p) {
+                            x += l - r - 1;
+                        } else if (l <= x && x < r) {
+                            x += p - r - 1;
                         } else {
-                            if (p <= x && x < l) {
-                                x += r - l + 1;
-                            } else if (l <= x && x < r) {
-                                x += p - l;
-                            } else {
-                                x += 0;
-                            }
-
-                            if (p <= y && y < l) {
-                                y += r - l + 1;
-                            } else if (l < y && y <= r) {
-                                y += p - l;
-                            } else {
-                                y += 0;
-                            }
+                            x += 0;
                         }
 
-                        d[fields.left]  = x;
-                        d[fields.right] = y;
+                        if (r < y && y < p) {
+                            y += l - r - 1;
+                        } else if (l < y && y <= r) {
+                            y += p - r - 1;
+                        } else {
+                            y += 0;
+                        }
+                    } else {
+                        if (p <= x && x < l) {
+                            x += r - l + 1;
+                        } else if (l <= x && x < r) {
+                            x += p - l;
+                        } else {
+                            x += 0;
+                        }
 
+                        if (p <= y && y < l) {
+                            y += r - l + 1;
+                        } else if (l < y && y <= r) {
+                            y += p - l;
+                        } else {
+                            y += 0;
+                        }
                     }
 
-                    if (i >= bindex) {
-                        // reset child but keep parent
-                        if (d._parent) {
-                            d._parent._child = [];
-                        }    
-                    }
+                    d[fields.left]  = x;
+                    d[fields.right] = y;
 
                 }
-                // rebuild...
-                this._rebuild(bindex);
-            }
-        },
-        _insert: function(data, type, dest) {
-            var fields = this.options.fields;
-            var level, index, child, chpos, pos, d;
 
-            switch(type) {
+                if (i >= bindex) {
+                    // reset child but keep parent
+                    if (d._parent) {
+                        d._parent._child = [];
+                    }    
+                }
+
+            }
+
+            // rebuild...
+            this._rebuild(bindex);
+
+            var tnode = this.nodeof(target);
+
+            if (tnode.length) {
+                this.render(RENDER_APPEND, true);
+            }
+
+        },
+        _insert: function (data, action, target) {
+            var fields = this.options.fields;
+            var dindex, bindex, child, chpos, pos, d;
+
+            switch(action) {
                 case 'append':
                     data._last   = true;
-                    data._root   = dest._root;
-                    data._parent = dest;
+                    data._root   = target._root;
+                    data._parent = target;
+                    data._metachanged = true;
 
-                    dest[fields.leaf] = 0;
-                    data[fields.path] = dest[fields.path] + '/' + data[fields.id];
-                    data[fields.level] = +dest[fields.level] + 1;
+                    data[fields.left]  = -1;
+                    data[fields.right] = -1;
+                    data[fields.path]  =  target[fields.path] + '/' + data[fields.id];
+                    
+                    // target[fields.leaf]  = 0;
+                    // data[fields.path]  =  target[fields.path] + '/' + data[fields.id];
+                    // data[fields.level] = +target[fields.level] + 1;
 
-                    dest._child = dest._child || [];
+                    child = target._child || [];
 
-                    if (dest._child.length) {
-                        index = this.index(this.get(dest._child[dest._child.length - 1])) + 1;
+                    if (child.length) {
+                        dindex = this.index(this.get(child[child.length - 1])) + 1;
                     } else {
-                        index = this.index(dest) + 1;
+                        dindex = this.index(target) + 1;
                     }
 
-                    dest._child.push(data);
-                    pos = +dest[fields.right];
-                    
+                    bindex = this.index(target);
+
+                    target._child = [];
+                    target[fields.leaf] = 0;
+                    target[fields.expand] = 1;
+                    target._metachanged = true;
+
+                    pos = +target[fields.right];
                     break;
                 case 'before':
 
-                    data[fields.left] = dest[fields.left];
-                    data[fields.right] = dest[fields.right];
-                    data[fields.level] = dest[fields.level];
+                    data._last   = false;
+                    data._root   = target._root;
+                    data._parent = target._parent;
+                    data._metachanged = true;
 
-                    data._last = false;
-                    data._root = dest._root;
-                    data._parent = dest._parent;
+                    data[fields.left]  = -1;
+                    data[fields.right] = -1;
+                    // data[fields.level] = target[fields.level];
 
-                    index = this.index(dest);
-                    pos   = this.left(dest);
+                    dindex = this.index(target);
+                    bindex = dindex;
+                    pos    = this.left(target);
 
                     if (data._parent) {
                         child  = data._parent._child || [];
-                        chpos = indexof(child, dest[fields.id]);
+                        chpos = _h.indexof(child, target[fields.id]);
                         chpos = chpos < -1 ? 0 : chpos;
                         child.splice(chpos, 0, data);
-
+                        
                         data[fields.path] = data._parent[fields.path] + '/' + data[fields.id];
+                        data._parent._child = [];
                     } else {
                         data[fields.path] = data[fields.id];
                     }
 
-                    break;
-                case 'after':
                     break;
             }
 
@@ -935,21 +973,28 @@
                 if (d[fields.right] >= pos) {
                     d[fields.right] = +d[fields.right] + 2;
                 }
-            }
+            }    
 
             data[fields.left]  = pos;
             data[fields.right] = pos + 1;
 
-            data._metachanged = true;
+            this._data.splice(dindex, 0, data);
 
-            this._data.splice(index, 0, data);
+            this._reindex(bindex);
+            this._rebuild(bindex);
 
-            this._reindex();
-            this._rebuild(); // TODO: check offset...
-
+            if ( ! this.isvisible(target)) {
+                this.scroll(target, $.proxy(function(){
+                    this.render(RENDER_APPEND, true);
+                    this.flash(data);
+                }, this));
+            } else {
+                this.render(RENDER_APPEND, true);
+                this.flash(data);
+            }
         },
         /** @private */
-        _startEdit: function(node) {
+        _startEdit: function (node) {
             var 
                 data = this._data[this._indexes[node.attr('data-id')]],
                 fields = this.options.fields,
@@ -972,14 +1017,14 @@
             this.edtext.val(text).focus();
 
             // defer text select
-            var defer = $.debounce(1, function(){
-                seltext(this.edtext, text.length);
+            var defer = $.debounce(1, function (){
+                _h.seltext(this.edtext, text.length);
             });
 
             defer.call(this);
         },
         /** @private */
-        _stopEdit: function(deselect) {
+        _stopEdit: function (deselect) {
             var 
                 fields = this.options.fields,
                 node = this.editor.closest('.bt-node');
@@ -1007,7 +1052,7 @@
                 }
 
                 if (text != orig) {
-                    this._fireEvent('edit', data, text);
+                    this.fire('edit', data, text);
                 }
             } else {
                 // manual deselect...
@@ -1016,15 +1061,15 @@
             }
         },
         /** @private */
-        _fireEvent: function() {
+        fire: function () {
             var args = $.makeArray(arguments),
                 name = (args.shift()) + '.bt';
             this.element.trigger(name, args);
         },
-        hasScroll: function() {
+        scrollable: function () {
             return this.element[0].scrollHeight > this.element.height();
         },
-        load: function(data, render) {
+        load: function (data, render) {
             var 
                 fields = this.options.fields,
                 start = this._data.length,
@@ -1037,105 +1082,72 @@
             this._rebuild(start, stop);
 
             render = render === undef ? false : render;
-            render && this.render();
+            render && this.render(RENDER_APPEND, false);
         },
-        render: function() {
+        render: function (type, cleanup) {
             var 
-                buff = this.options.buffer * this.options.itemSize,
-                spix = this.grid.scrollTop() - this.grid.position().top - buff,
-                epix = spix + buff + this.element.height() + buff,
-                data = $.grep(this._data, function(d){ return !d._hidden; });
-            
-            spix = spix < 0 ? 0 : spix;
-            epix = epix < 0 ? 0 : epix;
+                buffer = this._buffer,
+                height = this.element.height(),
+                offset = 0 - this.grid.position().top,
+                stacks = $.grep(this._data, function(d){ return ! d._hidden; });
 
-            var 
-                begidx = Math.floor(spix / this.options.itemSize),
-                endidx = Math.ceil(epix / this.options.itemSize),
-                padtop = this.options.itemSize * begidx,
-                padbtm = this.options.itemSize * data.slice(endidx).length;
+            var begpix, endpix;
+
+            type = type === undef ? RENDER_APPEND : type;
+            cleanup = cleanup === undef ? false : cleanup;
+
+            if (type == RENDER_APPEND) {
+                begpix = offset;
+                endpix = begpix + height + buffer;
+            } else {
+                begpix = offset - buffer;
+                endpix = begpix + buffer + height;
+            }
+
+            begpix = begpix < 0 ? 0 : begpix;
+
+            var
+                begrow = Math.floor(begpix / this.options.itemSize),
+                endrow = Math.ceil(endpix / this.options.itemSize),
+                padtop = this.options.itemSize * begrow,
+                padbtm = this.options.itemSize * stacks.slice(endrow).length;
 
             this.grid.css({
                 paddingTop: padtop,
                 paddingBottom: padbtm
             });
 
-            this._renderRange(data, begidx, endidx);
+            this._renderRange(stacks, begrow, endrow, type, cleanup);
         },
-        scroll: function(data) {
+        scroll: function (data, callback) {
             var 
+                element = this.element,
                 options = this.options,
-                stacks  = $.grep(this._data, function(d){ return ! d._hidden; }),
-                scroll  = indexof(stacks, data) * options.itemSize,
-                element = this.element;
+                stacks  = $.grep(this._data, function (d){ return ! d._hidden; }),
+                offset  = _h.indexof(stacks, data) * options.itemSize - (parseInt(this.grid.css('margin-top'), 10) || 0),
+                currtop = element.scrollTop(),
+                duration = Math.abs(currtop - offset);
 
-            element.animate({scrollTop: scroll}, scroll);
+            callback = callback || $.noop;
+            element.animate({scrollTop: offset}, duration, 'swing', callback);
         },
-        visible: function() {
+        visible: function () {
             return this._visible;
         },
-        create: function(spec) {
-            if ( ! spec) {
-                this._error("create(): spec doesn't meet requirement!");
-                return false;
-            }
+        create: function (data) {
+            data._root = null;
+            data._parent = null;
+            data._last = true;
+            data._metachanged = true;
 
-            // setup structure
-            var fields = this.options.fields,
-                guid = this._guid(),
-                prop,
-                key;
-
-            for (prop in fields) {
-                key = fields[prop];
-                if (spec[key] === undef) {
-                    switch(prop) {
-                        case 'id':
-                            spec[key] = guid;
-                            break;
-                        case 'leaf':
-                        case 'expand':
-                            spec[key] = 1;
-                            break;
-                        default:
-                            spec[key] = '';
-                    }
-                }
-            }
-
-            // setup metadata
-            spec._hidden = false;
+            this._data.push(data);
             
-            var 
-                owner = this.selection(),
-                first = this.first(),
-                result = true;
+            this._reindex();
+            this._rebuild();
 
-            if (owner) {
-                result = this.append(owner, spec);
-            } else if (first) {
-                result = this.before(first, spec);
-            } else {
-                spec[fields.left]  = 1;
-                spec[fields.right] = 2;
-                spec._root = null;
-                spec._parent = null;
-                spec._last = true;
-
-                this._data.unshift(spec);
-
-                this._reindex();
-                this._rebuild();
-                this.render();
-
-                render = true;
-                result = true;
-            }
-
-            this._debug();
-            return result;
+            this.render(RENDER_APPEND, true);
         },
-        remove: function(data, cascade) {
+        remove: function (data, cascade) {
             if (data) {
                 var
                     fields = this.options.fields,
@@ -1148,9 +1160,9 @@
                     var 
                         removed = this.descendants(data), 
                         owner = data._parent,
-                        prev = this.prev(data),
-                        size,
-                        key;
+                        prev = this.prev(data);
+
+                    var child, size, key;
 
                     removed.unshift(data);
                     size = removed.length;
@@ -1162,13 +1174,14 @@
                     this._reindex(offset);
 
                     if (owner) {
-                        owner._child = owner._child || [];
-                        var chpos = indexof(owner._child, data[fields.id]);
-                        if (chpos > -1) {
-                            owner._child.splice(chpos, 1);
-                            if ( ! owner._child.length) {
+                        child = owner._child || [];
+                        if (child.length) {
+                            var pos = _h.indexof(child, data[fields.id]);
+                            child.splice(pos, 1);
+                            if ( ! child.length) {
                                 owner[fields.leaf] = '1';
                             }
+                            owner._child = [];
                         }
                         this._rebuild(this.index(owner));
                     } else {
@@ -1178,70 +1191,71 @@
                             this._rebuild(offset);    
                         }
                     }
+                    
+                    this.fire('dispose', data);
 
-                    if (node.length) this.render();
+                    if (node.length) {
+                        this.deselect(node);
+                        this.render(RENDER_APPEND, true);
+                    }
                 }
                 return true;
             }
             return false;
         },
-        update: function(data, spec) {
-            data = data || {};
-            spec = spec || {};
-        },
-        append: function(owner, data) {
+        append: function (owner, data) {
             if (this._isvalid(data, 'append', owner)) {
-                var node = this.nodeof(owner), desc;
                 if (this.isphantom(data)) {
                     this._insert(data, 'append', owner);
                 } else {
-                    desc = this.descendants(data);
-                    this._detach(data, desc);
-                    this._attach(data, desc, 'append', owner);
+                    var desc = this.descendants(data);
+
+                    this._take(data, desc);
+                    this._move(data, desc, 'append', owner);
+                    this.fire('move', data, 'append', owner);
                 }
-                if (node.length) this.render();
                 return true;
             }
             return false;
         },
-        before: function(next, data) {
+        before: function (next, data) {
             if (this._isvalid(data, 'before', next)) {
-                var node = this.nodeof(next), desc;
                 if (this.isphantom(data)) {
                     this._insert(data, 'before', next);
                 } else {
-                    desc = this.descendants(data);
-                    this._detach(data, desc);
-                    this._attach(data, desc, 'before', next);
+                    var desc = this.descendants(data);
+
+                    this._take(data, desc);
+                    this._move(data, desc, 'before', next);
+                    this.fire('move', data, 'before', next);
                 }
-
-                if (node.length) this.render();
                 return true;
             }
             return false;
         },
-        after: function(prev, data) {
+        after: function (prev, data) {
             if (this._isvalid(data, 'after', prev)) {
-                var 
-                    desc = this.descendants(data),
-                    node = this.nodeof(prev);
+                if (this.isphantom(data)) {
+                    this._insert(data, 'after', prev);
+                } else {
+                    var desc = this.descendants(data);
 
-                this._detach(data, desc);
-                this._attach(data, desc, 'after', prev);
-
-                if (node.length) this.render();
+                    this._take(data, desc);
+                    this._move(data, desc, 'after', prev);
+                    this.fire('move', data, 'after', prev);
+                }
                 return true;
             }
             return false;
         },
-        get: function(key) {
+        get: function (key) {
             var index = this._indexes[key];
             return this._data[index] || null;
         },
-        data: function(index) {
+        data: function (index) {
             return index !== undef ? this._data[index] : this._data;
         },
-        index: function(data) {
+        index: function (data) {
             if (data) {
                 var key = data[this.options.fields.id],
                     idx = this._indexes[key];
@@ -1249,53 +1263,53 @@
             }
             return -1;
         },
-        size: function(data) {
+        size: function (data) {
             return this.right(data) - this.left(data) + 1;
         },
-        level: function(data) {
+        level: function (data) {
             return +data[this.options.fields.level];
         },
-        left: function(data) {
+        left: function (data) {
             return +data[this.options.fields.left];
         },
-        right: function(data) {
+        right: function (data) {
             return +data[this.options.fields.right];
         },
-        isphantom: function(data) {
+        isphantom: function (data) {
             return this.index(data) === -1;
         },
-        isleaf: function(data) {
+        isleaf: function (data) {
             return this.right(data) - this.left(data) === 1;
         },
-        isparent: function(data) {
+        isparent: function (data) {
             return ! this.isleaf(data);
         },
-        isancestor: function(data, target) {
+        isancestor: function (data, target) {
             return this.left(data) > this.left(target) && this.right(data) < this.right(target);
         },
-        isdescendant: function(data, target) {
+        isdescendant: function (data, target) {
             return this.left(target) > this.left(data) && this.right(target) < this.right(data);
         },
-        isexpanded: function(data) {
+        isexpanded: function (data) {
             return +data[this.options.fields.expand] === 1;
         },
-        iscollapsed: function(data) {
+        iscollapsed: function (data) {
             return ! this.isexpanded(data);
         },
-        isvisible: function(data) {
+        isvisible: function (data) {
             var stacks = this.visible();
-            return indexof(stacks, data) > -1;
+            return _h.indexof(stacks, data) > -1;
         },
-        first: function() {
+        first: function () {
             return this._data[0];
         },
-        last: function() {
+        last: function () {
             return this._data[this._data.length - 1];
         },
-        parent: function(data) {
+        parent: function (data) {
             return data._parent;
         },
-        prev: function(data) {
+        prev: function (data) {
             var 
                 fields = this.options.fields,
                 owner = data._parent,
@@ -1304,7 +1318,7 @@
 
             if (owner) {
                 var child = owner._child || [];
-                index = this._indexes[child[indexof(child, data[fields.id]) - 1]];
+                index = this._indexes[child[_h.indexof(child, data[fields.id]) - 1]];
                 found = this.data(index);
             } else {
                 var prev, plvl, dlvl;
@@ -1324,7 +1338,7 @@
 
             return found || null;
         },
-        next: function(data) {
+        next: function (data) {
             var 
                 fields = this.options.fields, 
                 owner = data._parent, 
@@ -1333,7 +1347,7 @@
 
             if (owner) {
                 var child = owner._child || [];
-                index = this._indexes[child[indexof(child, data[fields.id]) + 1]];
+                index = this._indexes[child[_h.indexof(child, data[fields.id]) + 1]];
                 found = this.data(index);
             } else {
                 var next, dlvl, nlvl;
@@ -1352,7 +1366,7 @@
             }
             return found;
         },
-        descendants: function(data) {
+        descendants: function (data) {
             var 
                 fields = this.options.fields,
                 start = this._indexes[data[fields.id]],
@@ -1368,7 +1382,7 @@
             }
             return desc;
         },
-        children: function(data) {
+        children: function (data) {
             var 
                 child = data._child || [],
                 len = child.length,
@@ -1384,85 +1398,96 @@
 
             return arr;
         },
-        createNode: function(data) {
-            return $($.templates.btnode(data));
-        },
-        nodeof: function(data) {
+        nodeof: function (data) {
             return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
         },
-        movedNode: function() {
+        movedNode: function () {
             return this.grid.children('.ui-sortable-helper');
         },
-        visibleNodes: function() {
+        visibleNodes: function () {
             return this.grid.children('.bt-node:not(.ui-sortable-placeholder)');
         },
-        removableNodes: function() {
+        removableNodes: function () {
             return this.grid.children().not('.ui-sortable-helper,.ui-sortable-placeholder');
         },
-        selectedNode: function() {
+        selectedNode: function () {
             var node = $({});
             if (this._selected) {
                 node = this.grid.children('.bt-node[data-id=' + this._selected + ']');
             }
             return node.length ? node : null;
         },
-        dataof: function(node) {
+        dataof: function (node) {
             var key = node.attr('data-id');
             return this._data[this._indexes[key]];
         },
-        cascade: function(data, handler, scope) {
+        cascade: function (data, handler, scope) {
             var desc = this.descendants(data) || [];
             desc.unshift(data);
             scope = scope || this;
-            $.each(desc, function(i, d){
+            $.each(desc, function (i, d){
                 $.proxy(handler, scope, d)();
             });
         },
         expand: function(data) {
-            var 
-                fields = this.options.fields,
-                fshow = function(data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = false;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fshow.call(this, ds[i]);
-                        }
-                    }    
-                };
+            var fields = this.options.fields,
+                descs = this.descendants(data),
+                dsize = descs.length;
+
+            var i;
 
             data[fields.expand] = '1';
             data._metachanged = true;
+            
+            for (i = 0; i < dsize; i++) {
+                descs[i]._hidden = false;
+            }
 
-            fshow.call(this, data);
-
-            this._fireEvent('expand', data);
-            this.render();
+            this.fire('expand', data);
+            this.render(RENDER_APPEND, true);
         },
-        collapse: function(data) {
-            var 
-                fields = this.options.fields,
-                fhide = function(data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = true;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fhide.call(this, ds[i]);
-                        }
-                    }     
-                };
+        collapse: function (data) {
+            var fields = this.options.fields,
+                descs = this.descendants(data),
+                dsize = descs.length;
 
-            data[fields.expand] = '0'; 
+            var i;
+
+            data[fields.expand] = '0';
             data._metachanged = true;
+            
+            for (i = 0; i < dsize; i++) {
+                descs[i]._hidden = true;
+            }
 
-            fhide.call(this, data);
-
-            this._fireEvent('collapse', data);
-            this.render();
+            this.fire('collapse', data);
+            this.render(RENDER_APPEND, true);
         },
-        toggle: function(node, silent, force) {
+        flash: function(data) {
+            var node = this.nodeof(data), body, drag;
+            if (node.length) {
+                body = node.children('.bt-node-body');
+                drag = body.children('.bt-drag');
+
+                body.addClass('flash');
+                drag.addClass('flash');
+
+                body.one(_h.transend(), function(){
+                    body.removeClass('start');
+                    drag.removeClass('start');
+                    body.one(_h.transend(), function() {
+                        body.removeClass('flash');
+                        drag.removeClass('flash');
+                    });
+                });
+
+                $.debounce(1, function(){ 
+                    body.addClass('start'); 
+                    drag.addClass('start');
+                })();
+            }
+        },
+        toggle: function (node, silent, force) {
             var expander = node.find('.elbow-expander');
             silent = silent === undef ? true : silent;
             if (expander.length) {
@@ -1478,27 +1503,27 @@
                 }
             }
         },
-        select: function(node, single) {
+        select: function (node, single) {
             single = single === undef ? true : single;
             if (single) this.deselectAll();
 
             this._selected = node.attr('data-id');
             node.addClass('bt-selected');
         },
-        deselect: function(node) {
+        deselect: function (node) {
             this._selected = null;
             node.removeClass('bt-selected');
         },
-        deselectAll: function() {
+        deselectAll: function () {
             this._selected = null;
             this.grid.children('.bt-selected').removeClass('bt-selected');
             this.editor.detach();
         },
-        selection: function() {
+        selection: function () {
             var node = this.grid.children('.bt-selected');
             return node.length ? this._data[this._indexes[this._selected]] : null;
         },
-        query: function(query) {
+        query: function (query) {
 
             var 
                 fields = this.options.fields,
@@ -1562,9 +1587,9 @@
             }
 
             regex = null;
-            this.render();
+            this.render(RENDER_APPEND, true);
         },
-        swap: function(from, to, reindex) {
+        swap: function (from, to, reindex) {
             var size = this._data.length, tmp, i;
             if (from != to && from >= 0 && from <= size && to >= 0 && to <= size) {
                 tmp = this._data[from];
@@ -1584,15 +1609,21 @@
                 if (reindex) this._reindex();
             }
         },
-        instance: function() {
+        instance: function () {
             return this;
         },
-        tickStart: function(name) {
+        mask: function() {
+            this.masker.appendTo(this.element);
+        },
+        unmask: function() {
+            this.masker.remove();
+        },
+        tickStart: function (name) {
             this.markers = this.markers || {};
             name = name === undef ? '_' : name;
             this.markers[name] = new Date();
         },
-        tickStop: function(name) {
+        tickStop: function (name) {
             this.markers = this.markers || {};
             name = name === undef ? '_' : name;
             if (this.markers[name] !== undef) {
@@ -1600,36 +1631,33 @@
                 console.log(name + ': ' + elapsed);
             }
         },
-        _onScroll: function(e) {
-            var 
-                options = this.options,
-                currtop = this.element.scrollTop(),
-                currdir = currtop > this._scrolltop ? 'down' : 'up',
-                buffzone,
-                trigger = false;
-
-            if (currdir == this._scrolldir) {
-                this._scrolldif = this._scrolldif + Math.abs(currtop - this._scrolltop);
-            } else {
-                trigger = true;
-                this._scrolldif = 0;
-            }
-
-            buffzone = (options.buffer * options.itemSize - this._buffedge);
-
-            if (this._scrolldir == '' || this._scrolldif >= buffzone) {
-                trigger = true;
-            }
-
-            if (trigger) {
-                this._scrolldif = 0;
-                this.render();
-            }
-
-            this._scrolltop = currtop;
-            this._scrolldir = currdir;
+        _onImmediateScroll: function(e){  
         },
-        _onExpanderClick: function(e) {
+        _onDelayedScroll: function(e) {
+            var 
+                currscr = this.element.scrollTop(),
+                currdir = currscr > this._lastscr ? DIR_DOWN : DIR_UP,
+                type = currdir == DIR_DOWN ? RENDER_APPEND : RENDER_PREPEND;
+
+            var trigger;
+
+            if (currdir == this._lastdir) {
+                this._lastdif = this._lastdif + Math.abs(currscr - this._lastscr);
+            } else {
+                this._lastdif = 0;
+            }
+
+            trigger = this._lastdir == '' || currdir != this._lastdir || this._lastdif >= this._edges;
+            
+            if (trigger) {
+                this._lastdif = 0;
+                this.render(type, false);
+            }
+
+            this._lastscr = currscr;
+            this._lastdir = currdir;
+        },
+        _onExpanderClick: function (e) {
             e.stopPropagation();
             var 
                 node = $(e.currentTarget).closest('.bt-node'),
@@ -1643,7 +1671,7 @@
                 }
             }
         },
-        _onNavigate: function(e) {
+        _onNavigate: function (e) {
             var code = e.keyCode || e.which;
             if (code == 9 || code == 38 || code == 40) {
                 var 
@@ -1677,7 +1705,7 @@
                 }
             }
         },
-        _onBeforeDrag: function(e, ui) {
+        _onBeforeDrag: function (e, ui) {
             var 
                 fields = this.options.fields,
                 node = ui.item,
@@ -1690,23 +1718,21 @@
 
             if (data) {
                 var 
-                    isexpand = +data[fields.expand] === 1,
                     desc = this.descendants(data),
                     size = desc.length,
                     attr;
 
                 if (size) {
                     this.toggle(node, true, 'collapse');
-                    attr = desc.map(function(d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
+                    attr = desc.map(function (d){return '.bt-node[data-id='+d[fields.id]+']';}).join(',');
                     this.grid.children(attr).remove();
                 }
 
             }
         },
-        _onAfterDrag: function(e, ui) {
+        _onAfterDrag: function (e, ui) {
             var 
                 options = this.options,
-                indexes = this._indexes,
                 fields = options.fields,
                 stacks = this._data,
                 node = ui.item,
@@ -1715,7 +1741,7 @@
                 prev = node.prev('.bt-node'),
                 next = node.next('.bt-node');
 
-            var lookup = function(current, start, level) {
+            var lookup = function (current, start, level) {
                 var 
                     siblings = [],
                     target = level - 1,
@@ -1801,16 +1827,16 @@
                 this._debug();
             }
         },
-        _error: function(message) {
+        _error: function (message) {
             this._message = message;
         },
-        _debug: function(message) {
+        _debug: function (message) {
             if (this.options.debug) {
                 message = message === undef ? this._message : message;
                 console.log(message);    
             }
         },
-        destroy: function(remove) {
+        destroy: function (remove) {
             this.edtext.off('.bt');
             this.element.off('.bt');
             this.element.sortable('destroy');
@@ -1822,20 +1848,26 @@
             this._selected = null;
 
             if (remove !== undef && remove === true) {
+                this.masker.remove();
+                this.masker = null;
+                
                 this.editor.remove();
+                this.editor = null;
+                
                 this.element.remove();
+                this.element = null;
             }
         }
     };
 
-    $.fn.bigtree = function(options) {
+    $.fn.bigtree = function (options) {
         var 
             args = $.makeArray(arguments),
             init = $.type(args[0]) !== 'string',
             list,
             func;
 
-        list = this.each(function(){
+        list = this.each(function (){
             var obj = $.data(this, 'bigtree');
             
             if ( ! obj) {
@@ -1844,7 +1876,7 @@
 
             if ( ! init) {
                 var method = args.shift();
-                if ($.isFunction(obj[method])) {
+                if ($.isFunction (obj[method])) {
                     func = obj[method].apply(obj, args);    
                 } else {
                     throw Error(method + ' is not function!');

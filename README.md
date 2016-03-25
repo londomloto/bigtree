@@ -114,14 +114,7 @@ Default: `<div></div>`
 HTML markup used to render each node, support jsrender templtating tags.
 
 ```xml
-<div 
-    class="bt-node bt-hbox {{if _last}}bt-last{{/if}}"
-    data-id="{{:id}}"
-    data-level="{{:level}}"
-    data-leaf="{{:leaf}}">
-    {{for _elbows}}
-    <div class="bt-node-elbow {{:type}}">{{:icon}}</div>
-    {{/for}}
+<div class="bt-node bt-hbox" data-id="{{:id}}">
     <div class="bt-node-body bt-flex bt-hbox">
         <div class="bt-drag"></div>
         <div class="bt-plugin head"></div>

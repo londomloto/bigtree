@@ -111,7 +111,7 @@ Leading and trailing rendered nodes from edges.
 Type: `String`
 Default: `<div></div>`
 
-HTML markup used to render each node, support jsrender templtating tags.
+Recommended markup used to render each node, support jsrender templtating tags.
 
 ```xml
 <div class="bt-node bt-hbox" data-id="{{:id}}">

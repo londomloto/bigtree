@@ -2,10 +2,13 @@
 var TrashPlugin = (function(){
     
     var Plugin = function(){
-        this.template = '<a class="btn btn-default btn-xs btn-icon" href="#"><i class="fa fa-trash-o></i></a>';
+        this.template = '<a class="btn btn-default btn-xs" href="#"><i class="fa fa-trash-o></i>{{:this.text}}</a>';
     };
     
     Plugin.prototype = {
+        update: function() {
+            this.text = 'Remove';  
+        },
         onInit: function(tree, data) {
             this.tree = tree;
             this.data = data;

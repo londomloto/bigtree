@@ -9,7 +9,7 @@
  *      - jQuery Throttle (http://benalman.com/pr
  *      ojects/jquery-throttle-debounce-plugin/)
  *
- * @author Roso Sasongko <roso.sasongko@gmail.com>
+ * @author Roso Sasongko <roso@kct.co.id>
  */
 (function ($, undef){
     
@@ -153,10 +153,9 @@
         markup: '<div data-id="{{:id}}" class="bt-node bt-hbox">'+
                     '<div class="bt-node-body bt-flex bt-hbox">'+
                         '<div class="bt-drag"></div>'+
-                        '<div class="bt-plugin head"></div>'+
+                        '<div class="bt-plugin head bt-hbox"></div>'+
                         '<div class="bt-text bt-flex bt-hbox">{{:text}}</div>'+
-                        '<div class="bt-plugin tail"></div>'+
-                        '<div class="bt-trash"></div>'+
+                        '<div class="bt-plugin tail bt-hbox"></div>'+
                     '</div>'+
                 '</div>',
 
@@ -171,7 +170,7 @@
                 '</div>',
 
         plugins: [],
-
+        safeMode: false,
         debug: true
     };
 
@@ -180,8 +179,13 @@
      */
     BigTree.prototype = {
         init: function (options) {
+
             this.options = $.extend(true, {}, BigTree.defaults, options || {});
-            
+
+            if (this.options.safeMode) {
+                this.options.plugins = [];
+            }
+
             this._buffer = this.options.itemSize * this.options.buffer;
             this._edges  = Math.floor(this._buffer / 2);
 
@@ -224,7 +228,7 @@
             });
 
             // force scroll to top
-            this.element.scrollTop(0);
+            this.grid.css({paddingTop: 0, paddingBottom: 0});
         },
         /** @private */
         _initEvents: function () {
@@ -276,18 +280,17 @@
             var 
                 plugins = this.options.plugins,
                 markup = $(this.options.markup),
-                tail = markup.find('.bt-plugin.tail'),
-                head = markup.find('.bt-plugin.head'),
-                regex = new RegExp('({[^{]+)this.', 'g'),
-                style = markup.attr('class');
+                style = markup.attr('class') || '';
 
-            // add attr data-number & :elbows holder
             markup.attr('data-number', '{{:_number}}').prepend('{{:_elbows}}');
+            markup.attr('class', style + ' {{if _last}} bt-last{{/if}} ');
 
-            // add :last holder
-            style += ' {{if _last}}bt-last{{/if}} ';
-            markup.attr('class', style);
-            
+            var 
+                head = markup.find('.bt-plugin.head'),
+                tail = markup.find('.bt-plugin.tail');
+
+            var regex = new RegExp('({[^{]+)this.', 'g');
+
             $.each(plugins, $.proxy(function (i, p){
                 if (p.template) {
                     
@@ -304,7 +307,7 @@
                     // console.log(p.template);
                     var prop, key;
 
-                    for (var prop in p) {
+                    for (prop in p) {
                         if (p.hasOwnProperty(prop)) {
                             if ($.type(p[prop]) === 'function') {
                                 key = '__' + p.id + '__' + prop;
@@ -319,8 +322,6 @@
 
             markup = $('<div>').append(markup).remove().html();
             regex  = null;
-
-            // this.options.markup = markup;
 
             $.templates('btnode_' + (++template), markup);
         },
@@ -496,7 +497,7 @@
                 }
             }
 
-            this.fire('beforerender', render);
+            this.fire('beforerender', render, suspend);
 
             // update plugin data
             var vsize = render.length, html;
@@ -532,6 +533,10 @@
 
             this._renderPlugins(render);
             this.fire('render', render);
+
+            suspend = null;
+            remove = null;
+            render = null;
         },
         /** @private */
         _decorate: function () { 
@@ -1399,7 +1404,13 @@
             return arr;
         },
         nodeof: function (data) {
-            return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');
+            if ($.isArray(data)) {
+                var fields = this.options.fields;
+                var query = $.map(data, function(d){ return '.bt-node[data-id='+d[fields.id]+']'; }).join(',');
+                return this.grid.children(query);
+            } else {
+                return this.grid.children('.bt-node[data-id='+(data[this.options.fields.id])+']');    
+            }
         },
         movedNode: function () {
             return this.grid.children('.ui-sortable-helper');
@@ -1429,6 +1440,52 @@
                 $.proxy(handler, scope, d)();
             });
         },
+
+        expand: function (data) {
+            var 
+                fields = this.options.fields,
+                fshow = function (data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = false;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fshow.call(this, ds[i]);
+                        }
+                    }    
+                };
+
+            data[fields.expand] = '1';
+            data._metachanged = true;
+
+            fshow.call(this, data);
+
+            this.fire('expand', data);
+            this.render(RENDER_APPEND, true);
+        },
+        collapse: function (data) {
+            var 
+                fields = this.options.fields,
+                fhide = function (data) {
+                    var ds = this.children(data),
+                        dz = ds.length;
+                    for (var i = 0; i < dz; i++) {
+                        ds[i]._hidden = true;
+                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
+                            fhide.call(this, ds[i]);
+                        }
+                    }     
+                };
+
+            data[fields.expand] = '0'; 
+            data._metachanged = true;
+
+            fhide.call(this, data);
+
+            this.fire('collapse', data);
+            this.render(RENDER_APPEND, true);
+        },
+
         expand: function(data) {
             var fields = this.options.fields,
                 descs = this.descendants(data),
@@ -1440,9 +1497,11 @@
             data._metachanged = true;
             
             for (i = 0; i < dsize; i++) {
-                descs[i]._hidden = false;
+                if (descs[i]._parent && descs[i]._parent[fields.expand] == '1') {
+                    descs[i]._hidden = false;
+                }
             }
-
+            
             this.fire('expand', data);
             this.render(RENDER_APPEND, true);
         },
@@ -1467,23 +1526,17 @@
             var node = this.nodeof(data), body, drag;
             if (node.length) {
                 body = node.children('.bt-node-body');
-                drag = body.children('.bt-drag');
-
                 body.addClass('flash');
-                drag.addClass('flash');
 
                 body.one(_h.transend(), function(){
                     body.removeClass('start');
-                    drag.removeClass('start');
                     body.one(_h.transend(), function() {
                         body.removeClass('flash');
-                        drag.removeClass('flash');
                     });
                 });
 
                 $.debounce(1, function(){ 
-                    body.addClass('start'); 
-                    drag.addClass('start');
+                    body.addClass('start');
                 })();
             }
         },
@@ -1539,19 +1592,19 @@
                 data  = this._data[i];
 
                 // reset first
-                if (data._orig) {
-                    data._hidden = data._orig.hidden;
+                if (data._query) {
+                    data._hidden = data._query.hidden;
                     
-                    data[fields.expand] = data._orig.expand;
-                    data[fields.text] = data._orig.text;
+                    data[fields.expand] = data._query.expand;
+                    data[fields.text] = data._query.text;
 
-                    delete data._orig;
+                    delete data._query;
                 }
 
                 if (query) {
                     text = data[fields.text];
 
-                    data._orig = {
+                    data._query = {
                         hidden: data._hidden,
                         expand: data[fields.expand],
                         text: text
@@ -1569,17 +1622,17 @@
                         );
 
                         data._hidden = false;
-                        data._orig.disp = disp;
+                        data._query.disp = disp;
                         data[fields.text] = disp;
 
-                        var pdat = data._parent;
+                        var owner = data._parent;
 
-                        while(pdat) {
-                            if (pdat._hidden) {
-                                pdat._hidden = false;
+                        while(owner) {
+                            if (owner._hidden) {
+                                owner._hidden = false;
                             }
-                            pdat[fields.expand] = '1';
-                            pdat = pdat._parent;
+                            owner[fields.expand] = '1';
+                            owner = owner._parent;
                         }
                     }
                 }
@@ -1587,6 +1640,56 @@
             }
 
             regex = null;
+            this.render(RENDER_APPEND, true);
+        },
+        filter: function(keys) {
+            var 
+                fields = this.options.fields,
+                stacks = this._data,
+                size = stacks.length,
+                regex;
+
+            keys = '_' + keys.join('_|_') + '_';
+            regex = new RegExp(keys);
+
+            for (var i = 0; i < size; i++) {
+
+                if (this._data[i]._filter) {
+                    this._data[i]._hidden = this._data[i]._filter.hidden;
+                    this._data[i][fields.expand] = this._data[i]._filter.expand;
+                    delete this._data[i]._filter;
+                }
+
+                if (keys != '__') {
+                    stacks[i]._filter = {
+                        hidden: stacks[i]._hidden,
+                        expand: stacks[i][fields.expand]
+                    };
+
+                    var found = regex.test('_' + stacks[i][fields.id] + '_');
+
+                    stacks[i]._hidden = true;
+
+                    if (found) {
+                        stacks[i]._hidden = false;
+
+                        var owner = stacks[i]._parent;
+
+                        while(owner) {
+                            if (owner._hidden) {
+                                owner._hidden = false;
+                            }
+                            owner[fields.expand] = '1';
+                            owner = owner._parent;
+                        }
+                    }   
+                }
+                
+            }
+
+            stacks = null;
+            regex = null;
+
             this.render(RENDER_APPEND, true);
         },
         swap: function (from, to, reindex) {
@@ -1835,6 +1938,18 @@
                 message = message === undef ? this._message : message;
                 console.log(message);    
             }
+        },
+        empty: function() {
+            this._data    = [];
+            this._indexes = {};
+            this._ranges  = [0, 0];
+            this._visible = [];
+            this._message = '';
+            this._selected = null;
+
+            this.editor.detach();
+            this.grid.empty();
+            this.grid.css({paddingTop: 0, paddingBottom: 0});
         },
         destroy: function (remove) {
             this.edtext.off('.bt');

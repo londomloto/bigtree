@@ -11,8 +11,8 @@
  *
  * @author Roso Sasongko <roso@kct.co.id>
  */
-(function ($, undef){
-    
+
+;(function($, undef){
     /**
      * Render constants
      */
@@ -170,6 +170,7 @@
                 '</div>',
 
         plugins: [],
+        helpers: {},
         safeMode: false,
         debug: true
     };
@@ -196,7 +197,7 @@
             this._visible = [];
             this._message = '';
 
-            this._helper = {};
+            this._helpers = {};
 
             this._initComponent();
             this._initEvents();
@@ -211,7 +212,7 @@
             this.element.addClass('bigtree').attr('tabindex', 1);
 
             this.editor = $('<div class="bt-editor"><input type="text"></div>');
-            this.edtext = this.editor.children('input');
+            this.input  = this.editor.children('input');
             this.grid   = $('<div class="bt-grid">').appendTo(this.element);
             // this.grid.addClass('test');
             
@@ -244,14 +245,17 @@
                 'click.bt.select '+
                 'click.bt.startedit');
 
-            this.edtext.off('click.bt keypress.bt');
+            this.input.off('click.bt keypress.bt');
 
             this.element.on({
                 'scroll.bt.delay': $.debounce(this.options.delay, $.proxy(this._onDelayedScroll, this)),
                 'keydown.bt': $.proxy(this._onNavigate, this),
                 'sortstart.bt': $.proxy(this._onBeforeDrag, this),
                 'sortstop.bt': $.proxy(this._onAfterDrag, this),
-                'click.bt.select': $.proxy(function (){ this.deselectAll(); }, this)
+                'click.bt.select': $.proxy(function (){ 
+                    this.deselectAll(); 
+                    this._stopEdit();
+                }, this)
             });
 
             this.element.on('click.bt.expander', '.elbow-expander', $.proxy(this._onExpanderClick, this));
@@ -262,14 +266,12 @@
                 this._startEdit(node);
             }, this));
 
-            this.edtext.on({
+            this.input.on({
                 'click.bt': function (e){
-                    e.preventDefault();
                     e.stopPropagation();
                 },
                 'keypress.bt': $.proxy(function (e){
                     if (e.keyCode === 13) {
-                        e.preventDefault();
                         this._stopEdit(false);
                     }
                 }, this)
@@ -283,7 +285,7 @@
                 style = markup.attr('class') || '';
 
             markup.attr('data-number', '{{:_number}}').prepend('{{:_elbows}}');
-            markup.attr('class', style + ' {{if _last}} bt-last{{/if}} ');
+            markup.attr('class', style + ' {{if _last}} bt-last{{/if}}{{if _match}} bt-match{{/if}} ');
 
             var 
                 head = markup.find('.bt-plugin.head'),
@@ -300,6 +302,18 @@
                         $.extend(proto, {update: $.noop});
                     }
 
+                    if (proto.onInit === undef) {
+                        $.extend(proto, {onInit: $.noop});
+                    }
+
+                    if (proto.onSuspend === undef) {
+                        $.extend(proto, {onSuspend: $.noop});
+                    }
+
+                    if (proto.onRender === undef) {
+                        $.extend(proto, {onRender: $.noop});
+                    }
+
                     p.id = p.id === undef ? i : p.id;
                     // we need to replace some placeholder
                     p.templateString = p.template; // save orig
@@ -307,11 +321,13 @@
                     // console.log(p.template);
                     var prop, key;
 
+                    $.extend(true, this._helpers, this.options.helpers);
+
                     for (prop in p) {
                         if (p.hasOwnProperty(prop)) {
                             if ($.type(p[prop]) === 'function') {
                                 key = '__' + p.id + '__' + prop;
-                                this._helper[key] = p[prop];
+                                this._helpers[key] = p[prop];
                             }
                         }
                     }
@@ -354,6 +370,7 @@
                 // actualy prepare for metadata
                 cur._elbows = '';
                 cur._level  = 0;
+                cur._editing = false;
 
                 // render number
                 cur._number = -1;
@@ -367,6 +384,7 @@
                     cur._parent = null;
                     cur._last   = true;
                     cur._hidden = false;
+                    cur._match  = false;
 
                     root = cur;
                 } else  {
@@ -376,15 +394,23 @@
                     pid = pid.pop();
 
                     par = this._data[this._indexes[pid]];
-                    par._child = par._child || [];
 
+                    if ( ! par) {
+                        throw new Error("Parent not found, invalid tree structure");
+                    }
+
+                    par._child = par._child || [];
                     chd = this._data[this._indexes[_h.lastof(par._child)]];
+
                     if (chd) chd._last = false;
+                    
 
                     cur._root   = root;
                     cur._parent = par;
                     cur._last   = true;
                     cur._hidden = +par[fields.expand] === 0 || par._hidden;
+
+                    cur._match  = false;
 
                     par._child.push(cur[fields.id]);
                 }
@@ -443,6 +469,9 @@
                 data = range[i];
                 pick = false;
 
+                // reset editor
+                data._editing = false;
+
                 // assign number;
                 data._number = (start + i);
 
@@ -466,7 +495,7 @@
                         var icon;
 
                         data._metachanged = false;
-                            
+                        
                         while(owner) {
                             lines[owner[fields.level]] = owner._last ? 0 : 1;
                             owner = owner._parent;
@@ -510,7 +539,7 @@
                 }
             }
 
-            html = $.templates['btnode_'+template](render, this._helper);
+            html = $.templates['btnode_'+template](render, this._helpers);
 
             if (cleanup) {
                 remove.remove();
@@ -539,12 +568,15 @@
             render = null;
         },
         /** @private */
-        _decorate: function () { 
+        _decorate: $.debounce(100, function () { 
             if (this._selected) {
                 var snode = this.grid.find('.bt-node[data-id='+this._selected+']');
-                if (snode.length) this.select(snode);
+                if (snode.length) {
+                    this.select(snode);
+                    this.element.focus();
+                }
             }
-        },
+        }),
         /** @private */
         _mixdata: function (data, plugin) {
             if (plugin.templateString && ! /this\./g.test(plugin.templateString)) {
@@ -683,13 +715,14 @@
             return true;
         },
         /** @private */
-        _take: function (data, descs) {
+        _revoke: function (data, descs) {
             var 
                 fields = this.options.fields,
                 offset = this.index(data),
                 size = descs.length;
 
             data._origin = null;
+            data._base = null;
 
             var 
                 owner = data._parent || null, 
@@ -707,9 +740,12 @@
                     }
                 }
                 data._origin = owner;
+                data._base = owner;
             } else {
                 var prev = this.prev(data);
-                if (prev) data._origin = prev; 
+                if (prev) {
+                    data._base = prev;
+                }
             }
 
             this._data.splice(offset, 1);
@@ -739,7 +775,7 @@
             this._reindex(offset);
         },
         /** @private */
-        _move: function (data, descs, action, target) {
+        _move: function (data, descs, action, target, silent) {
             var 
                 fields = this.options.fields,
                 dsize = descs.length,
@@ -819,12 +855,13 @@
             
             this._reindex(offset);
 
-            var origin = data._origin, oidx;
+            // wait, we have base?
+            var base = data._base, bof;
 
-            if (origin) {
-                oidx = this.index(origin);
-                if (oidx < bindex) bindex = oidx;
-                delete data._origin;
+            if (base) {
+                bof = this.index(base);
+                if (bof < bindex) bindex = bof;
+                delete data._base;
             }
 
             // update like SQL
@@ -902,8 +939,17 @@
                 this.render(RENDER_APPEND, true);
             }
 
+            silent = silent === undef ? false : silent;
+
+            var origin = data._origin;
+            delete data._origin;
+            
+            if ( ! silent) {
+                this.fire('move', data, action, target, origin);
+            }
+
         },
-        _insert: function (data, action, target) {
+        _insert: function (data, action, target, silent) {
             var fields = this.options.fields;
             var dindex, bindex, child, chpos, pos, d;
 
@@ -988,88 +1034,101 @@
             this._reindex(bindex);
             this._rebuild(bindex);
 
+            silent = silent === undef ? false : silent;
+
             if ( ! this.isvisible(target)) {
                 this.scroll(target, $.proxy(function(){
                     this.render(RENDER_APPEND, true);
                     this.flash(data);
+
+                    if ( ! silent) {
+                        this.fire('insert', data, action, target);    
+                    }
                 }, this));
             } else {
                 this.render(RENDER_APPEND, true);
                 this.flash(data);
+
+                if ( ! silent) {
+                    this.fire('insert', data, action, target);
+                }
             }
         },
         /** @private */
         _startEdit: function (node) {
             var 
-                data = this._data[this._indexes[node.attr('data-id')]],
                 fields = this.options.fields,
-                holder = node.find('.bt-text'),
+                data = this.dataof(node),
                 text = data[fields.text];
 
-            // remove query hightlight
-            if (data._orig && data._orig.text) {
-                text = data._orig.text;
+            if (data._editing) {
+                return;
             }
 
-            // drop previous editing
-            this._stopEdit(true);
+            var evt = $.Event('beforeedit.bt');
+            
+            this.fire(evt, data, node);
 
-            // ensure selection
+            if (evt.isDefaultPrevented()) {
+                evt = null;
+                return;
+            }
+
+            evt = null;
+
+            // stop other active editing
+            this._stopEdit();
+
+            // make selection
             this.select(node);
 
             // place editor
-            this.editor.appendTo(holder);
-            this.edtext.val(text).focus();
+            this.editor.appendTo(node.find('.bt-text'));
+            this.input.val(text).focus();
+
+            data._editing = true;
 
             // defer text select
             var defer = $.debounce(1, function (){
-                _h.seltext(this.edtext, text.length);
+                _h.seltext(this.input, text.length);
             });
 
             defer.call(this);
         },
         /** @private */
-        _stopEdit: function (deselect) {
-            var 
-                fields = this.options.fields,
-                node = this.editor.closest('.bt-node');
-                
+        _stopEdit: function (detach) {
+            var node = this.editor.closest('.bt-node');
             if (node.length) {
                 var 
-                    data = this._data[this._indexes[node.attr('data-id')]],
-                    text = this.edtext.val(),
-                    orig = data[fields.text],
-                    disp = text;
+                    fields = this.options.fields,
+                    data = this.dataof(node),
+                    text = this.input.val(),
+                    spec = {};
 
-                if (data._orig && data._orig.text) {
-                    orig = data._orig.text;
-                    disp = data._orig.disp;
-                }
+                detach = detach === undef ? true : false;
 
-                data[fields.text] = disp;
-                deselect = deselect === undef ? true : deselect;
-                
-                if (deselect) {
-                    this.deselect(node);
-                    // remove editor
+                if (detach) {
+                    data._editing = false;
                     this.editor.detach();
-                    node.find('.bt-text').html(disp);
+                    node.find('.bt-text').html(text);
                 }
 
-                if (text != orig) {
-                    this.fire('edit', data, text);
+                if (text != data[fields.text]) {
+                    spec[fields.text] = text;
+                    this.update(data, text);
                 }
-            } else {
-                // manual deselect...
-                this._selected = null;
-                this.grid.find('.bt-selected').removeClass('bt-selected');
             }
         },
         /** @private */
         fire: function () {
-            var args = $.makeArray(arguments),
-                name = (args.shift()) + '.bt';
-            this.element.trigger(name, args);
+            var args = $.makeArray(arguments), 
+                name = args.shift();
+
+            if ($.type(name) === 'string') {
+                name += '.bt';
+            }
+
+            return this.element.trigger(name, args);
         },
         scrollable: function () {
             return this.element[0].scrollHeight > this.element.height();
@@ -1139,7 +1198,28 @@
         visible: function () {
             return this._visible;
         },
-        create: function (data) {
+        update: function(data, text, silent) {
+            var fields = this.options.fields, node;
+
+            data[fields.text] = text;
+            
+            node = this.nodeof(data);
+
+            if (node.length) {
+                if ( ! data._editing) {
+                    node.find('.bt-text').html(text);
+                } else {
+                    node.find('.bt-text input').val(text);
+                }
+            }
+
+            silent = silent === undef ? false : silent;
+
+            if ( ! silent) {
+                this.fire('update', data, fields.text, text);
+            }
+        },
+        create: function (data, silent) {
             data._root = null;
             data._parent = null;
             data._last = true;
@@ -1151,8 +1231,14 @@
             this._rebuild();
 
             this.render(RENDER_APPEND, true);
+
+            silent = silent === undef ? false : silent;
+
+            if ( ! silent) {
+                this.fire('insert', data, 'create', null);
+            }
         },
-        remove: function (data, cascade) {
+        remove: function (data, cascade, silent) {
             if (data) {
                 var
                     fields = this.options.fields,
@@ -1197,7 +1283,11 @@
                         }
                     }
                     
-                    this.fire('dispose', data);
+                    silent = silent === undef ? false : silent;
+                    
+                    if ( ! silent) {
+                        this.fire('dispose', data);    
+                    }
 
                     if (node.length) {
                         this.deselect(node);
@@ -1208,46 +1298,44 @@
             }
             return false;
         },
-        append: function (owner, data) {
+        append: function (owner, data, silent) {
             if (this._isvalid(data, 'append', owner)) {
                 if (this.isphantom(data)) {
-                    this._insert(data, 'append', owner);
+                    this._insert(data, 'append', owner, silent);
                 } else {
                     var desc = this.descendants(data);
-
-                    this._take(data, desc);
-                    this._move(data, desc, 'append', owner);
-                    this.fire('move', data, 'append', owner);
+                    this._revoke(data, desc);
+                    this._move(data, desc, 'append', owner, silent);
                 }
+
                 return true;
             }
+
             return false;
         },
-        before: function (next, data) {
+        before: function (next, data, silent) {
             if (this._isvalid(data, 'before', next)) {
                 if (this.isphantom(data)) {
-                    this._insert(data, 'before', next);
+                    this._insert(data, 'before', next, silent);
                 } else {
                     var desc = this.descendants(data);
 
-                    this._take(data, desc);
-                    this._move(data, desc, 'before', next);
-                    this.fire('move', data, 'before', next);
+                    this._revoke(data, desc);
+                    this._move(data, desc, 'before', next, silent);
                 }
                 return true;
             }
+
             return false;
         },
-        after: function (prev, data) {
+        after: function (prev, data, silent) {
             if (this._isvalid(data, 'after', prev)) {
                 if (this.isphantom(data)) {
-                    this._insert(data, 'after', prev);
+                    this._insert(data, 'after', prev, silent);
                 } else {
                     var desc = this.descendants(data);
-
-                    this._take(data, desc);
-                    this._move(data, desc, 'after', prev);
-                    this.fire('move', data, 'after', prev);
+                    this._revoke(data, desc);
+                    this._move(data, desc, 'after', prev, silent);
                 }
                 return true;
             }
@@ -1304,6 +1392,9 @@
         isvisible: function (data) {
             var stacks = this.visible();
             return _h.indexof(stacks, data) > -1;
+        },
+        isselected: function(data) {
+            return this._selected == data[this.options.fields.id];
         },
         first: function () {
             return this._data[0];
@@ -1441,51 +1532,6 @@
             });
         },
 
-        expand: function (data) {
-            var 
-                fields = this.options.fields,
-                fshow = function (data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = false;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fshow.call(this, ds[i]);
-                        }
-                    }    
-                };
-
-            data[fields.expand] = '1';
-            data._metachanged = true;
-
-            fshow.call(this, data);
-
-            this.fire('expand', data);
-            this.render(RENDER_APPEND, true);
-        },
-        collapse: function (data) {
-            var 
-                fields = this.options.fields,
-                fhide = function (data) {
-                    var ds = this.children(data),
-                        dz = ds.length;
-                    for (var i = 0; i < dz; i++) {
-                        ds[i]._hidden = true;
-                        if (ds[i]._child !== undef && ds[i][fields.expand] == '1') {
-                            fhide.call(this, ds[i]);
-                        }
-                    }     
-                };
-
-            data[fields.expand] = '0'; 
-            data._metachanged = true;
-
-            fhide.call(this, data);
-
-            this.fire('collapse', data);
-            this.render(RENDER_APPEND, true);
-        },
-
         expand: function(data) {
             var fields = this.options.fields,
                 descs = this.descendants(data),
@@ -1497,9 +1543,7 @@
             data._metachanged = true;
             
             for (i = 0; i < dsize; i++) {
-                if (descs[i]._parent && descs[i]._parent[fields.expand] == '1') {
-                    descs[i]._hidden = false;
-                }
+                descs[i]._hidden = descs[i]._parent ? (descs[i]._parent[fields.expand] == '0' || descs[i]._parent._hidden) : false;
             }
             
             this.fire('expand', data);
@@ -1570,7 +1614,6 @@
         deselectAll: function () {
             this._selected = null;
             this.grid.children('.bt-selected').removeClass('bt-selected');
-            this.editor.detach();
         },
         selection: function () {
             var node = this.grid.children('.bt-selected');
@@ -1592,12 +1635,11 @@
                 data  = this._data[i];
 
                 // reset first
+                data._match = false;
+
                 if (data._query) {
                     data._hidden = data._query.hidden;
-                    
                     data[fields.expand] = data._query.expand;
-                    data[fields.text] = data._query.text;
-
                     delete data._query;
                 }
 
@@ -1606,24 +1648,18 @@
 
                     data._query = {
                         hidden: data._hidden,
-                        expand: data[fields.expand],
-                        text: text
+                        expand: data[fields.expand]
                     };
 
                     var found = regex.exec(text);
 
                     data._hidden = true;
+                    data._match  = false;
 
                     if (found) {
 
-                        disp = data[fields.text].replace(
-                            found[1], 
-                            '<span class="bt-hightlight">'+found[1]+'</span>'
-                        );
-
                         data._hidden = false;
-                        data._query.disp = disp;
-                        data[fields.text] = disp;
+                        data._match = true;
 
                         var owner = data._parent;
 
@@ -1654,10 +1690,10 @@
 
             for (var i = 0; i < size; i++) {
 
-                if (this._data[i]._filter) {
-                    this._data[i]._hidden = this._data[i]._filter.hidden;
-                    this._data[i][fields.expand] = this._data[i]._filter.expand;
-                    delete this._data[i]._filter;
+                if (stacks[i]._filter) {
+                    stacks[i]._hidden = stacks[i]._filter.hidden;
+                    stacks[i][fields.expand] = stacks[i]._filter.expand;
+                    delete stacks[i]._filter;
                 }
 
                 if (keys != '__') {
@@ -1776,6 +1812,7 @@
         },
         _onNavigate: function (e) {
             var code = e.keyCode || e.which;
+
             if (code == 9 || code == 38 || code == 40) {
                 var 
                     node = this.grid.find('.bt-selected'),
@@ -1785,7 +1822,6 @@
                 e.preventDefault();
 
                 if (node.length) {
-
                     switch(code) {
                         // tab
                         case 9:
@@ -1920,14 +1956,15 @@
             if (args.length) {
                 var action = args.shift(),
                     result = this[action].apply(this, args);
-                
                 if (result) {
                     if ( ! this.isvisible(data)) this.scroll(data);
                 } else {
                     this._debug();
+                    this.render(RENDER_APPEND, true);
                 }
             } else {
                 this._debug();
+                this.render(RENDER_APPEND, true);
             }
         },
         _error: function (message) {
@@ -1952,7 +1989,7 @@
             this.grid.css({paddingTop: 0, paddingBottom: 0});
         },
         destroy: function (remove) {
-            this.edtext.off('.bt');
+            this.input.off('.bt');
             this.element.off('.bt');
             this.element.sortable('destroy');
             

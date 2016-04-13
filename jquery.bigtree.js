@@ -272,6 +272,7 @@
                 },
                 'keypress.bt': $.proxy(function (e){
                     if (e.keyCode === 13) {
+                        e.preventDefault();
                         this._stopEdit(false);
                     }
                 }, this)
@@ -1077,7 +1078,7 @@
             evt = null;
 
             // stop other active editing
-            this._stopEdit();
+            // this._stopEdit();
 
             // make selection
             this.select(node);
@@ -1601,6 +1602,8 @@
             }
         },
         select: function (node, single) {
+            this._stopEdit();
+
             single = single === undef ? true : single;
             if (single) this.deselectAll();
 
@@ -1608,10 +1611,14 @@
             node.addClass('bt-selected');
         },
         deselect: function (node) {
+            this._stopEdit();
+
             this._selected = null;
             node.removeClass('bt-selected');
         },
         deselectAll: function () {
+            this._stopEdit();
+
             this._selected = null;
             this.grid.children('.bt-selected').removeClass('bt-selected');
         },
@@ -1897,7 +1904,7 @@
                 }
                 
                 if (siblings.length) {
-                    return ['after', siblings[siblings.length - 1], current];
+                    return ['after', siblings[0], current];
                 } else {
                     return ['append', look, current];    
                 }

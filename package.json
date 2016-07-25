@@ -11,8 +11,7 @@
     "url": "git+https://github.com/londomloto/bigtree.git"
   },
   "keywords": [
-    "jquery",
-    "plugin",
+    "jquery-plugin",
     "tree",
     "grid"
   ],

@@ -5,7 +5,7 @@
 	overflow: auto;
 	overflow-x: hidden;
 	overflow-y: scroll;
-	background: #f4f4f4;
+	background: #f5f7f8;
 }
 
 .bigtree .bt-hbox {
@@ -32,6 +32,14 @@
 	margin: 20px;
 }
 
+.bt-mask {
+    position: absolute;
+    margin-top: -10px;
+    margin-left: -12px;
+    left: 50%;
+    top: 50%;
+}
+
 .bt-node {
 	height: 32px;
 	margin: 0;
@@ -40,8 +48,9 @@
 }
 
 .bt-node.bt-selected .bt-node-body {
-	outline: solid 1px #FCC127;
-	border-color: #FCC127;
+	outline: 2px solid #98AAB3;
+	outline-offset: -2px;
+	border-color: #98AAB3;
 }
 
 .bt-node.bt-selected .bt-drag,
@@ -68,21 +77,21 @@
 }
 
 .bt-node-elbow.elbow-line:before {
-	border-left: solid 1px #ccc;
+	border-left: solid 1px #dfdfdf;
 	left: 10px;
 	top: -1px;
 	bottom: -1px;
 }
 
 .bt-node-elbow.elbow-end:before {
-	border-left: solid 1px #ccc;
+	border-left: solid 1px #dfdfdf;
 	left: 10px;
 	top: -1px;
 	bottom: -1px;
 }
 
 .bt-node-elbow.elbow-end:after {
-	border-top: solid 1px #ccc;
+	border-top: solid 1px #dfdfdf;
 	left: 10px;
 	top: 14px;
 	right: 0;
@@ -118,10 +127,11 @@
 }
 
 .bt-node-body {
-	border: solid 1px #ccc;
+	border: solid 1px #E3EBEF;
 	background: #ffffff;
 	overflow: hidden;
 	padding: 0;
+	border-radius: 0;
 }
 
 .bt-node.bt-moving .bt-node-elbow:not(.elbow-end):before {
@@ -145,7 +155,7 @@
 
 .bt-drag {
 	width: 16px;
-	background: #ffffff url(../bigtree/sprites.png) no-repeat -28px -15px;
+	background: transparent url(../bigtree/sprites.png) no-repeat -28px -15px;
 	border-width: 0;
 	cursor: pointer;
 }
@@ -157,10 +167,12 @@
 
 .bt-text,
 .bt-editor input {
-	font-family: Roboto;
 	font-weight: 300;
-	font-size: 12px;
-	color: #222;
+	font-size: 13px;
+	color: #333;
+	/*overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;*/
 }
 
 .bt-text {
@@ -171,6 +183,27 @@
 	padding: 0 0 0 5px;
 	position: relative;
 	/*cursor: text;*/
+}
+
+.bt-text input {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+
+	border: none;
+	width: 100%;
+	outline: none;
+	padding: 0;
+	background-color: transparent;
+
+	font-weight: 300;
+	font-size: 13px;
+	color: inherit;
+}
+
+.bt-selected .bt-text input {
+	color: #333;
 }
 
 .bt-editor {
@@ -189,6 +222,18 @@
 	padding: 0;
 }
 
+.bt-node.bt-match .bt-node-body .bt-text {
+	background: transparent;
+	background: -moz-linear-gradient(top, rgba(255,255,0,0) 0%, rgba(255,255,0,0) 16%, rgba(255,255,0,1) 17%, rgba(255,255,0,1) 85%, rgba(255,255,0,0) 86%, rgba(255,255,0,0) 100%);
+	background: -webkit-linear-gradient(top, rgba(255,255,0,0) 0%,rgba(255,255,0,0) 16%,rgba(255,255,0,1) 17%,rgba(255,255,0,1) 85%,rgba(255,255,0,0) 86%,rgba(255,255,0,0) 100%);
+	background: linear-gradient(to bottom, rgba(255,255,0,0) 0%,rgba(255,255,0,0) 16%,rgba(255,255,0,1) 17%,rgba(255,255,0,1) 85%,rgba(255,255,0,0) 86%,rgba(255,255,0,0) 100%);
+	filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#00ffff00', endColorstr='#00ffff00',GradientType=0 );
+}
+
+.bt-node.bt-match .bt-node-body .bt-text input {
+	color: #333;
+}
+
 /** dragdrop */
 .bt-node-sortable.ui-sortable-placeholder {
 	background: url(../bigtree/sprites.png) no-repeat -1px -15px;
@@ -198,12 +243,45 @@
 	opacity: .5;
 }
 
-/** plugin container */
-.bt-plugin.head {
-	/*width: 100px;*/
+/** test: 100px; */
+.bt-grid.test .bt-node {
+	height: 100px;
 }
-.bt-plugin.tail {
-	width: 313px;
-	padding-left: 5px;
-	/*background: #00BCD4;*/
+
+.bt-grid.test .bt-node-body {
+	height: 98px;
+}
+
+.bt-grid.test .bt-node-elbow.elbow-line::before {
+	bottom: -70px;
+}
+
+.bt-grid.test .bt-node-elbow.elbow-end::before {
+	bottom: -70px;
+}
+
+.bt-grid.test .bt-node-elbow.elbow-end::after {
+	top: 50px;
+}
+
+.bt-grid.test .bt-node.bt-last .bt-node-elbow.elbow-end::before {
+	bottom: -20px;
+}
+
+.bt-grid.test .bt-node-elbow .elbow-expander {
+	top: 43px;
+}
+
+/** flash transition */
+.bt-node-body.flash {
+	-webkit-transition: background-color .2s ease-out;
+    -moz-transition: background-color .2s ease-out;
+    -ms-transition: background-color .2s ease-out;
+    -o-transition: background-color .2s ease-out;
+    transition: background-color .2s ease-out;
+}
+
+.bt-node-body.flash.start {
+	background-color: #FFEB3B !important;
+	border-color: #FFC107 !important;
 }

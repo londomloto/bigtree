@@ -15,7 +15,10 @@ High performance hierarchical data rendering based on nested set model (pre-orde
 
 __Bigtree__ is jQuery plugin that relies on some libraries:
 
-* [jQuery UI (sortable)](http://jqueryui.com/resources/download/jquery-ui-1.11.4.zip)
+* [jQuery](http://code.jquery.com/jquery-2.2.1.min.js)
+* [jQuery UI](http://jqueryui.com/resources/download/jquery-ui-1.11.4.zip)
+* [jQuery Throttle & Debounce](http://github.com/cowboy/jquery-throttle-debounce/raw/v1.1/jquery.ba-throttle-debounce.min.js)
+* [jsRender](https://www.jsviews.com/download/jsrender.min.js)
 
 ##Install
 
@@ -108,10 +111,17 @@ Leading and trailing rendered nodes from edges.
 Type: `String`
 Default: `<div></div>`
 
-Recommended markup used to render each node, support jsrender templtating tags.
+HTML markup used to render each node, support jsrender templtating tags.
 
 ```xml
-<div class="bt-node bt-hbox" data-id="{{:id}}">
+<div 
+    class="bt-node bt-hbox {{if _last}}bt-last{{/if}}"
+    data-id="{{:id}}"
+    data-level="{{:level}}"
+    data-leaf="{{:leaf}}">
+    {{for _elbows}}
+    <div class="bt-node-elbow {{:type}}">{{:icon}}</div>
+    {{/for}}
     <div class="bt-node-body bt-flex bt-hbox">
         <div class="bt-drag"></div>
         <div class="bt-plugin head"></div>
